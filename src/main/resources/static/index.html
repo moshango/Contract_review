@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 合同审查助手</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header class="header">
+            <h1>🤖 AI 合同审查助手</h1>
+            <p class="subtitle">智能合同解析与批注系统</p>
+        </header>
+
+        <!-- 主要功能区 -->
+        <main class="main-content">
+            <!-- 功能选项卡 -->
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('parse')">📄 合同解析</button>
+                <button class="tab-btn" onclick="switchTab('annotate')">✍️ 合同批注</button>
+                <button class="tab-btn" onclick="switchTab('standards')">📋 审查标准</button>
+                <button class="tab-btn" onclick="switchTab('prompt')">🤖 智能审查</button>
+            </div>
+
+            <!-- 合同解析面板 -->
+            <div id="parse-panel" class="panel active">
+                <div class="panel-header">
+                    <h2>合同解析</h2>
+                    <p>上传合同文件,自动提取条款结构并生成锚点</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="file-upload-label">
+                        <input type="file" id="parse-file" accept=".docx,.doc" onchange="handleParseFileSelect(this)">
+                        <span class="file-upload-btn">📁 选择合同文件</span>
+                        <span class="file-name" id="parse-file-name">支持 .docx 和 .doc 格式</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label for="anchor-mode">锚点模式:</label>
+                    <select id="anchor-mode">
+                        <option value="none">不生成锚点</option>
+                        <option value="generate" selected>生成锚点</option>
+                        <option value="regenerate">重新生成锚点</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="return-mode">返回模式:</label>
+                    <select id="return-mode" onchange="handleReturnModeChange()">
+                        <option value="json" selected>JSON结果</option>
+                        <option value="file">文档文件</option>
+                        <option value="both">JSON + 文档</option>
+                    </select>
+                </div>
+
+                <button class="btn btn-primary" onclick="parseContract()">
+                    <span class="btn-icon">🚀</span> 开始解析
+                </button>
+
+                <!-- 解析结果显示 -->
+                <div id="parse-result" class="result-box" style="display: none;">
+                    <h3>解析结果</h3>
+                    <pre id="parse-result-content"></pre>
+                    <button class="btn btn-secondary" onclick="copyParseResult()">📋 复制结果</button>
+                </div>
+
+                <div id="parse-loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>正在解析合同,请稍候...</p>
+                </div>
+            </div>
+
+            <!-- 合同批注面板 -->
+            <div id="annotate-panel" class="panel">
+                <div class="panel-header">
+                    <h2>合同批注</h2>
+                    <p>根据AI审查结果在合同中插入批注</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="file-upload-label">
+                        <input type="file" id="annotate-file" accept=".docx" onchange="handleAnnotateFileSelect(this)">
+                        <span class="file-upload-btn">📁 选择合同文件</span>
+                        <span class="file-name" id="annotate-file-name">仅支持 .docx 格式</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label for="review-json">审查结果 JSON:</label>
+                    <textarea id="review-json" rows="10" placeholder='粘贴审查结果JSON,格式示例:
+{
+  "issues": [
+    {
+      "anchorId": "anc-c1-4f21",
+      "clauseId": "c1",
+      "severity": "HIGH",
+      "category": "合作范围",
+      "finding": "合作范围描述不够明确",
+      "suggestion": "建议明确列举具体的合作项目和范围边界"
+    }
+  ]
+}'></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="anchor-strategy">锚点定位策略:</label>
+                    <select id="anchor-strategy">
+                        <option value="preferAnchor" selected>优先锚点,否则条款ID</option>
+                        <option value="anchorOnly">仅使用锚点</option>
+                        <option value="textFallback">允许文本匹配</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="cleanup-anchors">
+                        <span>批注完成后清理锚点</span>
+                    </label>
+                </div>
+
+                <button class="btn btn-primary" onclick="annotateContract()">
+                    <span class="btn-icon">✨</span> 开始批注
+                </button>
+
+                <div id="annotate-result" class="result-box" style="display: none;">
+                    <h3>批注完成</h3>
+                    <p>带批注的合同文档已自动下载</p>
+                    <button class="btn btn-secondary" onclick="resetAnnotateForm()">继续批注</button>
+                </div>
+
+                <div id="annotate-loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>正在添加批注,请稍候...</p>
+                </div>
+            </div>
+
+            <!-- 审查标准面板 -->
+            <div id="standards-panel" class="panel">
+                <div class="panel-header">
+                    <h2>审查标准管理</h2>
+                    <p>查看和管理合同审查标准与规则</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="contract-type-select">合同类型:</label>
+                    <select id="contract-type-select" onchange="loadStandardsByType()">
+                        <option value="general">通用合同</option>
+                        <option value="technology">技术服务合同</option>
+                        <option value="purchase">采购合同</option>
+                        <option value="service">服务合同</option>
+                        <option value="agency">代理合同</option>
+                        <option value="employment">劳动合同</option>
+                        <option value="lease">租赁合同</option>
+                    </select>
+                </div>
+
+                <button class="btn btn-primary" onclick="loadReviewStandards()">
+                    <span class="btn-icon">📋</span> 加载审查标准
+                </button>
+
+                <div id="standards-result" class="result-box" style="display: none;">
+                    <h3>审查标准详情</h3>
+                    <div id="standards-content"></div>
+                </div>
+
+                <div id="standards-loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>正在加载审查标准...</p>
+                </div>
+            </div>
+
+            <!-- 智能审查面板 -->
+            <div id="prompt-panel" class="panel">
+                <div class="panel-header">
+                    <h2>智能审查</h2>
+                    <p>自动生成LLM审查Prompt,提高审查效率</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="prompt-contract-type">合同类型:</label>
+                    <select id="prompt-contract-type">
+                        <option value="general">通用合同</option>
+                        <option value="technology">技术服务合同</option>
+                        <option value="purchase">采购合同</option>
+                        <option value="service">服务合同</option>
+                        <option value="agency">代理合同</option>
+                        <option value="employment">劳动合同</option>
+                        <option value="lease">租赁合同</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="contract-json-input">合同解析结果:</label>
+                    <textarea id="contract-json-input" rows="8" placeholder="粘贴合同解析的JSON结果..."></textarea>
+                </div>
+
+                <button class="btn btn-primary" onclick="generateReviewPrompt()">
+                    <span class="btn-icon">🤖</span> 生成审查Prompt
+                </button>
+
+                <div id="prompt-result" class="result-box" style="display: none;">
+                    <h3>生成的审查Prompt</h3>
+                    <div class="prompt-instructions">
+                        <h4>📝 使用说明:</h4>
+                        <p>1. 复制下方生成的Prompt</p>
+                        <p>2. 粘贴到LLM工具(ChatGPT/Claude/Coze等)</p>
+                        <p>3. 获取审查结果后在"合同批注"功能中使用</p>
+                    </div>
+                    <pre id="prompt-content"></pre>
+                    <button class="btn btn-secondary" onclick="copyPromptResult()">📋 复制Prompt</button>
+                </div>
+
+                <div id="prompt-loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>正在生成审查Prompt...</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- 底部信息 -->
+        <footer class="footer">
+            <div class="info-cards">
+                <div class="info-card">
+                    <h3>📚 使用说明</h3>
+                    <ul>
+                        <li>1. 上传合同进行解析,获取条款结构</li>
+                        <li>2. 将解析结果提交给LLM审查</li>
+                        <li>3. 使用LLM返回的JSON添加批注</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <h3>⚙️ 系统信息</h3>
+                    <ul>
+                        <li>版本: 1.0.0</li>
+                        <li>最大文件: 50MB</li>
+                        <li>支持格式: .docx, .doc</li>
+                    </ul>
+                </div>
+                <div class="info-card">
+                    <h3>🔗 API端点</h3>
+                    <ul>
+                        <li>POST /parse - 合同解析</li>
+                        <li>POST /annotate - 合同批注</li>
+                        <li>GET /health - 健康检查</li>
+                    </ul>
+                </div>
+            </div>
+            <p class="copyright">© 2025 AI Contract Review Assistant | Powered by Spring Boot</p>
+        </footer>
+    </div>
+
+    <!-- 消息提示 -->
+    <div id="toast" class="toast"></div>
+
+    <script src="/js/main.js"></script>
+</body>
+</html>

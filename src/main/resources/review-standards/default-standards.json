@@ -1,0 +1,180 @@
+[
+  {
+    "id": "default",
+    "name": "通用合同审查标准",
+    "description": "适用于各类合同的通用审查标准",
+    "contractType": "general",
+    "version": "1.0",
+    "enabled": true,
+    "createdAt": "2024-10-11T10:00:00",
+    "rules": [
+      {
+        "id": "rule_confidentiality",
+        "name": "保密条款完整性检查",
+        "description": "检查保密条款是否定义明确、违约责任是否清晰",
+        "category": "保密条款",
+        "severity": "HIGH",
+        "targetClauses": ["保密", "商业秘密", "机密信息", "confidential"],
+        "condition": "保密条款缺乏明确定义或违约责任不明确",
+        "findingTemplate": "保密条款存在风险：缺乏对商业秘密的明确定义和违约责任标准",
+        "suggestionTemplate": "建议：1)明确定义商业秘密范围；2)设定具体的违约金额；3)规定信息披露的例外情况",
+        "enabled": true,
+        "weight": 100
+      },
+      {
+        "id": "rule_intellectual_property",
+        "name": "知识产权归属检查",
+        "description": "检查知识产权归属是否明确，权利义务是否平衡",
+        "category": "知识产权",
+        "severity": "HIGH",
+        "targetClauses": ["知识产权", "著作权", "专利权", "商标权", "技术成果"],
+        "condition": "知识产权归属不明确或权利义务失衡",
+        "findingTemplate": "知识产权条款存在重大风险：归属不明确或未考虑开发方的技术投入",
+        "suggestionTemplate": "建议：1)区分项目专用代码和通用技术；2)明确开发工具和框架的权利归属；3)设定合理的使用许可条款",
+        "enabled": true,
+        "weight": 95
+      },
+      {
+        "id": "rule_termination",
+        "name": "合同终止条件检查",
+        "description": "检查合同终止条件是否明确，违约处理是否完善",
+        "category": "终止条款",
+        "severity": "HIGH",
+        "targetClauses": ["终止", "解除", "违约", "breach"],
+        "condition": "终止条件模糊或违约处理不完善",
+        "findingTemplate": "合同终止条款存在风险：终止条件不够明确，容易产生争议",
+        "suggestionTemplate": "建议：1)明确列举终止的具体情形；2)设定终止通知期限；3)规定终止后的数据处理和交接程序",
+        "enabled": true,
+        "weight": 90
+      },
+      {
+        "id": "rule_payment",
+        "name": "付款条款合理性检查",
+        "description": "检查付款条件、方式和时限的合理性",
+        "category": "付款条款",
+        "severity": "MEDIUM",
+        "targetClauses": ["付款", "支付", "结算", "费用", "价款"],
+        "condition": "付款条件不合理或缺乏保障机制",
+        "findingTemplate": "付款条款需要改进：付款比例或时限设置不够合理",
+        "suggestionTemplate": "建议：1)采用里程碑付款方式；2)设定合理的预付款比例；3)明确逾期付款的违约责任",
+        "enabled": true,
+        "weight": 80
+      },
+      {
+        "id": "rule_delivery",
+        "name": "交付验收标准检查",
+        "description": "检查交付标准和验收流程是否明确",
+        "category": "交付条款",
+        "severity": "MEDIUM",
+        "targetClauses": ["交付", "验收", "完成", "delivery"],
+        "condition": "交付标准不明确或验收流程缺失",
+        "findingTemplate": "交付验收条款需要完善：缺乏明确的验收标准和流程",
+        "suggestionTemplate": "建议：1)制定详细的验收标准；2)设定验收时限；3)明确验收不合格的处理方式",
+        "enabled": true,
+        "weight": 75
+      },
+      {
+        "id": "rule_liability",
+        "name": "违约责任平衡性检查",
+        "description": "检查违约责任是否对等，赔偿标准是否合理",
+        "category": "违约责任",
+        "severity": "MEDIUM",
+        "targetClauses": ["违约", "责任", "赔偿", "liability"],
+        "condition": "违约责任不对等或赔偿标准不合理",
+        "findingTemplate": "违约责任条款需要平衡：违约金设置可能过高或责任分配不均",
+        "suggestionTemplate": "建议：1)设定合理的违约金比例；2)区分不同违约情形；3)平衡双方的责任承担",
+        "enabled": true,
+        "weight": 70
+      },
+      {
+        "id": "rule_force_majeure",
+        "name": "不可抗力条款检查",
+        "description": "检查不可抗力条款是否完善",
+        "category": "不可抗力",
+        "severity": "LOW",
+        "targetClauses": ["不可抗力", "force majeure", "天灾"],
+        "condition": "不可抗力条款不够完善",
+        "findingTemplate": "不可抗力条款可以优化：定义范围或处理程序可以更完善",
+        "suggestionTemplate": "建议：1)明确不可抗力的具体情形；2)设定通知义务；3)规定损失分担原则",
+        "enabled": true,
+        "weight": 60
+      },
+      {
+        "id": "rule_dispute",
+        "name": "争议解决机制检查",
+        "description": "检查争议解决的方式和管辖是否明确",
+        "category": "争议解决",
+        "severity": "LOW",
+        "targetClauses": ["争议", "仲裁", "诉讼", "管辖"],
+        "condition": "争议解决机制不够完善",
+        "findingTemplate": "争议解决条款可以完善：可考虑更高效的解决方式",
+        "suggestionTemplate": "建议：1)可增加仲裁选项；2)明确管辖法院；3)设定争议解决的前置程序",
+        "enabled": true,
+        "weight": 55
+      },
+      {
+        "id": "rule_communication",
+        "name": "沟通联系条款检查",
+        "description": "检查沟通机制和联系方式是否完善",
+        "category": "沟通条款",
+        "severity": "LOW",
+        "targetClauses": ["通知", "联系", "沟通", "报告"],
+        "condition": "沟通机制不够完善",
+        "findingTemplate": "沟通条款可以优化：沟通方式或频率可以更明确",
+        "suggestionTemplate": "建议：1)明确沟通方式和频率；2)设定项目报告制度；3)规定紧急联系程序",
+        "enabled": true,
+        "weight": 50
+      }
+    ]
+  },
+  {
+    "id": "technology",
+    "name": "技术服务合同审查标准",
+    "description": "专门针对软件开发、技术咨询等技术服务合同的审查标准",
+    "contractType": "technology",
+    "version": "1.0",
+    "enabled": true,
+    "createdAt": "2024-10-11T10:00:00",
+    "rules": [
+      {
+        "id": "tech_requirements",
+        "name": "技术需求明确性检查",
+        "description": "检查技术需求、功能规格是否明确具体",
+        "category": "技术需求",
+        "severity": "HIGH",
+        "targetClauses": ["功能", "需求", "规格", "技术标准"],
+        "condition": "技术需求描述不够具体或可测试性不足",
+        "findingTemplate": "技术需求条款存在风险：需求描述不够具体，可能导致理解分歧",
+        "suggestionTemplate": "建议：1)提供详细的功能规格说明；2)制定可测试的验收标准；3)明确性能指标要求",
+        "enabled": true,
+        "weight": 100
+      },
+      {
+        "id": "tech_security",
+        "name": "数据安全条款检查",
+        "description": "检查数据处理、存储、传输的安全要求",
+        "category": "数据安全",
+        "severity": "HIGH",
+        "targetClauses": ["数据", "安全", "隐私", "加密"],
+        "condition": "数据安全要求不够完善",
+        "findingTemplate": "数据安全条款存在重大风险：缺乏完善的数据保护措施",
+        "suggestionTemplate": "建议：1)明确数据分类和保护等级；2)规定加密传输要求；3)设定数据备份和恢复程序",
+        "enabled": true,
+        "weight": 95
+      },
+      {
+        "id": "tech_personnel",
+        "name": "关键人员条款检查",
+        "description": "检查关键技术人员的约束和变更影响",
+        "category": "人员管理",
+        "severity": "MEDIUM",
+        "targetClauses": ["人员", "团队", "项目经理", "技术负责人"],
+        "condition": "关键人员约束不足或变更机制不完善",
+        "findingTemplate": "人员管理条款需要改进：关键人员变更可能影响项目质量",
+        "suggestionTemplate": "建议：1)明确关键岗位人员要求；2)设定人员变更审批程序；3)规定知识交接义务",
+        "enabled": true,
+        "weight": 75
+      }
+    ]
+  }
+]

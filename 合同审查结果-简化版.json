@@ -1,0 +1,25 @@
+{
+  "issues": [
+    {
+      "clauseId": "c2",
+      "severity": "HIGH",
+      "category": "保密条款",
+      "finding": "保密条款缺乏对商业秘密的明确定义",
+      "suggestion": "应明确定义商业秘密范围，设定具体的违约金额"
+    },
+    {
+      "clauseId": "c4",
+      "severity": "MEDIUM",
+      "category": "付款条款",
+      "finding": "预付款比例过低，可能影响乙方资金流",
+      "suggestion": "建议调整付款节点，增设里程碑付款"
+    },
+    {
+      "clauseId": "c6",
+      "severity": "LOW",
+      "category": "质量保证",
+      "finding": "48小时响应时间可能过于严格",
+      "suggestion": "可根据bug严重程度设定不同响应时间"
+    }
+  ]
+}
