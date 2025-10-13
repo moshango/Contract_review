@@ -137,40 +137,125 @@ public class ContractAnnotateService {
      */
     private int findParagraphIndex(XWPFDocument doc, List<Clause> clauses,
                                    ReviewIssue issue, String strategy) {
+
+        logger.debug("查找段落位置: clauseId={}, anchorId={}, strategy={}",
+                    issue.getClauseId(), issue.getAnchorId(), strategy);
+
         if ("anchorOnly".equalsIgnoreCase(strategy)) {
             // 仅使用锚点定位
             if (issue.getAnchorId() != null) {
-                return docxUtils.findParagraphByAnchor(doc, issue.getAnchorId());
+                int index = docxUtils.findParagraphByAnchor(doc, issue.getAnchorId());
+                logger.debug("锚点定位结果: anchorId={}, index={}", issue.getAnchorId(), index);
+                return index;
             }
             return -1;
         } else if ("textFallback".equalsIgnoreCase(strategy)) {
             // 优先锚点,然后条款ID,最后文本匹配
             if (issue.getAnchorId() != null) {
                 int index = docxUtils.findParagraphByAnchor(doc, issue.getAnchorId());
-                if (index >= 0) return index;
+                if (index >= 0) {
+                    logger.debug("锚点定位成功: anchorId={}, index={}", issue.getAnchorId(), index);
+                    return index;
+                }
             }
 
             if (issue.getClauseId() != null) {
                 int index = docxUtils.findParagraphByClauseId(clauses, issue.getClauseId());
-                if (index >= 0) return index;
+                if (index >= 0) {
+                    logger.debug("条款ID定位成功: clauseId={}, index={}", issue.getClauseId(), index);
+                    return index;
+                }
             }
 
-            // TODO: 实现文本匹配fallback
+            // 文本匹配fallback - 查找包含特定关键词的段落
+            if (issue.getClauseId() != null) {
+                int index = findParagraphByTextMatch(doc, issue.getClauseId());
+                if (index >= 0) {
+                    logger.debug("文本匹配定位成功: clauseId={}, index={}", issue.getClauseId(), index);
+                    return index;
+                }
+            }
+
             return -1;
         } else {
-            // 默认策略: preferAnchor
-            // 优先使用锚点,否则使用条款ID
+            // 默认策略: preferAnchor - 优先使用锚点,否则使用条款ID
             if (issue.getAnchorId() != null) {
                 int index = docxUtils.findParagraphByAnchor(doc, issue.getAnchorId());
-                if (index >= 0) return index;
+                if (index >= 0) {
+                    logger.debug("锚点定位成功: anchorId={}, index={}", issue.getAnchorId(), index);
+                    return index;
+                }
+                logger.debug("锚点定位失败，尝试条款ID定位: anchorId={}", issue.getAnchorId());
             }
 
             if (issue.getClauseId() != null) {
-                return docxUtils.findParagraphByClauseId(clauses, issue.getClauseId());
+                int index = docxUtils.findParagraphByClauseId(clauses, issue.getClauseId());
+                logger.debug("条款ID定位结果: clauseId={}, index={}", issue.getClauseId(), index);
+                return index;
             }
 
             return -1;
         }
+    }
+
+    /**
+     * 通过文本匹配查找段落
+     * 查找包含"第X条"模式的段落
+     *
+     * @param doc XWPFDocument对象
+     * @param clauseId 条款ID (如"c1", "c2")
+     * @return 段落索引,未找到返回-1
+     */
+    private int findParagraphByTextMatch(XWPFDocument doc, String clauseId) {
+        try {
+            // 从clauseId提取数字 (c1 -> 1, c2 -> 2)
+            String numStr = clauseId.replaceAll("[^0-9]", "");
+            if (numStr.isEmpty()) {
+                return -1;
+            }
+
+            // 构造可能的条款标题模式
+            String[] patterns = {
+                "第" + numStr + "条",
+                "第" + convertToChineseNumber(Integer.parseInt(numStr)) + "条"
+            };
+
+            List<XWPFParagraph> paragraphs = doc.getParagraphs();
+            for (int i = 0; i < paragraphs.size(); i++) {
+                String text = paragraphs.get(i).getText();
+                if (text != null) {
+                    for (String pattern : patterns) {
+                        if (text.contains(pattern)) {
+                            logger.debug("文本匹配成功: pattern={}, text={}, index={}", pattern, text, i);
+                            return i;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("文本匹配查找失败: clauseId={}", clauseId, e);
+        }
+
+        return -1;
+    }
+
+    /**
+     * 将阿拉伯数字转换为中文数字
+     */
+    private String convertToChineseNumber(int num) {
+        String[] chineseNumbers = {"", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"};
+        if (num >= 1 && num <= 10) {
+            return chineseNumbers[num];
+        } else if (num > 10 && num < 100) {
+            int ten = num / 10;
+            int unit = num % 10;
+            if (ten == 1) {
+                return unit == 0 ? "十" : "十" + chineseNumbers[unit];
+            } else {
+                return chineseNumbers[ten] + "十" + (unit == 0 ? "" : chineseNumbers[unit]);
+            }
+        }
+        return String.valueOf(num);
     }
 
     /**

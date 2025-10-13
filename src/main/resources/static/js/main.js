@@ -1,6 +1,7 @@
 // 全局变量
 let parseFile = null;
 let annotateFile = null;
+let autoReviewFile = null;
 
 // 切换选项卡
 function switchTab(tabName) {
@@ -512,4 +513,443 @@ function switchTab(tabName) {
             showToast('已自动填充合同解析结果', 'success');
         }
     }
+
+    // 切换到自动化审查选项卡时,检查AI服务状态
+    if (tabName === 'auto-review') {
+        checkAIServiceStatus();
+    }
+}
+
+// ========== 自动化审查功能 ==========
+
+// 处理自动化审查文件选择
+function handleAutoReviewFileSelect(input) {
+    const file = input.files[0];
+    if (file) {
+        autoReviewFile = file;
+        const fileNameSpan = document.getElementById('auto-review-file-name');
+        fileNameSpan.textContent = file.name;
+        fileNameSpan.classList.add('selected');
+    }
+}
+
+// 检查AI服务配置状态
+async function checkAIServiceStatus() {
+    try {
+        const response = await fetch('/auto-review/status');
+        const status = await response.json();
+
+        displayAIServiceStatus(status);
+    } catch (error) {
+        console.error('检查AI服务状态失败:', error);
+        document.getElementById('ai-status-content').innerHTML = `
+            <p class="error-text">❌ 无法连接到后端服务</p>
+        `;
+    }
+}
+
+// 显示AI服务状态
+function displayAIServiceStatus(status) {
+    const contentDiv = document.getElementById('ai-status-content');
+
+    const claudeStatus = status.claude.available ? '✅ 已配置' : '❌ 未配置';
+    const openaiStatus = status.openai.available ? '✅ 已配置' : '❌ 未配置';
+    const mockStatus = status.mock && status.mock.available ? '✅ 可用' : '❌ 不可用';
+    const chatgptWebStatus = status.chatgptWeb && status.chatgptWeb.available ? '✅ 可用' : '❌ 不可用';
+
+    let html = `
+        <div class="status-grid">
+            <div class="status-item">
+                <strong>Claude:</strong> ${claudeStatus}
+                ${status.claude.available ? `<span class="model-name">(${status.claude.model})</span>` : ''}
+            </div>
+            <div class="status-item">
+                <strong>OpenAI:</strong> ${openaiStatus}
+                ${status.openai.available ? `<span class="model-name">(${status.openai.model})</span>` : ''}
+            </div>
+            <div class="status-item">
+                <strong>模拟AI:</strong> ${mockStatus}
+                ${status.mock && status.mock.available ? `<span class="model-name">(测试用)</span>` : ''}
+            </div>
+            <div class="status-item">
+                <strong>ChatGPT网页版:</strong> ${chatgptWebStatus}
+                ${status.chatgptWeb && status.chatgptWeb.available ? `<span class="model-name">(https://chatgpt.com/)</span>` : ''}
+            </div>
+        </div>
+    `;
+
+    if (!status.autoReviewAvailable) {
+        html += `
+            <div class="warning-box">
+                <p>⚠️ 未配置AI服务，请配置API密钥或使用模拟/ChatGPT网页版</p>
+                <p class="config-hint">可选择: Claude API、OpenAI API、模拟服务或ChatGPT网页版</p>
+            </div>
+        `;
+    } else {
+        html += `
+            <div class="success-box">
+                <p>✅ AI服务已就绪，可以使用自动化审查功能</p>
+                <p class="current-provider">当前配置: ${status.configuredProvider}</p>
+            </div>
+        `;
+    }
+
+    contentDiv.innerHTML = html;
+}
+
+// 开始自动化审查
+async function startAutoReview() {
+    if (!autoReviewFile) {
+        showToast('请先选择合同文件', 'error');
+        return;
+    }
+
+    const contractType = document.getElementById('auto-contract-type').value;
+    const aiProvider = document.getElementById('ai-provider').value;
+    const cleanupAnchors = document.getElementById('auto-cleanup-anchors').checked;
+
+    // 显示进度和加载状态
+    showAutoReviewProcess();
+    showLoading('auto-review');
+    hideResult('auto-review');
+
+    // 构建FormData
+    const formData = new FormData();
+    formData.append('file', autoReviewFile);
+
+    try {
+        const url = `/auto-review?contractType=${contractType}&aiProvider=${aiProvider}&cleanupAnchors=${cleanupAnchors}`;
+
+        // 更新进度 - 开始
+        updateProcessStep(1, 'processing');
+
+        const response = await fetch(url, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || '自动化审查失败');
+        }
+
+        // 所有步骤完成
+        updateProcessStep(1, 'completed');
+        updateProcessStep(2, 'completed');
+        updateProcessStep(3, 'completed');
+        updateProcessStep(4, 'completed');
+
+        // 下载文件
+        const blob = await response.blob();
+        const filename = autoReviewFile.name.replace('.docx', '-AI审查完成.docx');
+        downloadFile(blob, filename);
+
+        // 显示结果
+        showAutoReviewResult(filename);
+        showToast('自动化审查完成! 文档已下载', 'success');
+
+    } catch (error) {
+        console.error('自动化审查失败:', error);
+        showToast('自动化审查失败: ' + error.message, 'error');
+        hideAutoReviewProcess();
+    } finally {
+        hideLoading('auto-review');
+    }
+}
+
+// 显示自动化审查进度
+function showAutoReviewProcess() {
+    document.getElementById('auto-review-process').style.display = 'block';
+
+    // 重置所有步骤
+    for (let i = 1; i <= 4; i++) {
+        updateProcessStep(i, 'pending');
+    }
+}
+
+// 隐藏自动化审查进度
+function hideAutoReviewProcess() {
+    document.getElementById('auto-review-process').style.display = 'none';
+}
+
+// 更新进度步骤
+function updateProcessStep(stepNumber, status) {
+    const stepElement = document.getElementById(`step-${stepNumber}`);
+    if (!stepElement) return;
+
+    const iconSpan = stepElement.querySelector('.step-icon');
+
+    // 移除旧状态
+    stepElement.classList.remove('pending', 'processing', 'completed', 'error');
+
+    // 添加新状态
+    stepElement.classList.add(status);
+
+    // 更新图标
+    switch (status) {
+        case 'pending':
+            iconSpan.textContent = '⏳';
+            break;
+        case 'processing':
+            iconSpan.textContent = '🔄';
+            break;
+        case 'completed':
+            iconSpan.textContent = '✅';
+            break;
+        case 'error':
+            iconSpan.textContent = '❌';
+            break;
+    }
+}
+
+// 显示自动化审查结果
+function showAutoReviewResult(filename) {
+    const resultBox = document.getElementById('auto-review-result');
+    const summaryDiv = document.getElementById('auto-review-summary');
+
+    summaryDiv.innerHTML = `
+        <div class="review-summary">
+            <p><strong>📄 文件名:</strong> ${filename}</p>
+            <p><strong>✅ 状态:</strong> 审查成功</p>
+            <p><strong>📊 流程:</strong> 解析 → AI审查 → 批注 → 输出</p>
+        </div>
+    `;
+
+    resultBox.style.display = 'block';
+}
+
+// 重置自动化审查表单
+function resetAutoReviewForm() {
+    document.getElementById('auto-review-file').value = '';
+    document.getElementById('auto-review-file-name').textContent = '仅支持 .docx 格式';
+    document.getElementById('auto-review-file-name').classList.remove('selected');
+    autoReviewFile = null;
+    hideResult('auto-review');
+    hideAutoReviewProcess();
+}
+
+// ========== ChatGPT 网页版集成功能 ==========
+
+let chatgptFile = null;
+let chatgptPrompt = null;
+
+// 处理ChatGPT文件选择
+function handleChatGPTFileSelect(input) {
+    const file = input.files[0];
+    if (file) {
+        chatgptFile = file;
+        const fileNameSpan = document.getElementById('chatgpt-file-name');
+        fileNameSpan.textContent = file.name;
+        fileNameSpan.classList.add('selected');
+
+        // 清理之前的结果
+        hideChatGPTPrompt();
+        hideChatGPTImport();
+    }
+}
+
+// 步骤1: 生成ChatGPT提示
+async function generateChatGPTPrompt() {
+    if (!chatgptFile) {
+        showToast('请先选择合同文件', 'error');
+        return;
+    }
+
+    const contractType = document.getElementById('chatgpt-contract-type').value;
+
+    // 显示加载状态
+    document.getElementById('chatgpt-generate-loading').style.display = 'block';
+    hideChatGPTPrompt();
+
+    // 构建FormData
+    const formData = new FormData();
+    formData.append('file', chatgptFile);
+
+    try {
+        const url = `/chatgpt/generate-prompt?contractType=${contractType}`;
+        const response = await fetch(url, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '生成提示失败');
+        }
+
+        const data = await response.json();
+        showChatGPTPrompt(data);
+        showToast('ChatGPT提示生成成功!', 'success');
+
+    } catch (error) {
+        console.error('生成ChatGPT提示失败:', error);
+        showToast('生成提示失败: ' + error.message, 'error');
+    } finally {
+        document.getElementById('chatgpt-generate-loading').style.display = 'none';
+    }
+}
+
+// 显示ChatGPT提示
+function showChatGPTPrompt(data) {
+    chatgptPrompt = data.chatgptPrompt;
+
+    const promptBox = document.getElementById('chatgpt-prompt-result');
+    const promptContent = document.getElementById('chatgpt-prompt-content');
+    const instructionsList = document.getElementById('chatgpt-instructions');
+
+    promptContent.textContent = data.chatgptPrompt;
+
+    // 显示使用说明
+    let instructionsHTML = '<h4>📋 使用步骤:</h4><ol>';
+    data.instructions.forEach(instruction => {
+        instructionsHTML += `<li>${instruction}</li>`;
+    });
+    instructionsHTML += '</ol>';
+    instructionsList.innerHTML = instructionsHTML;
+
+    promptBox.style.display = 'block';
+
+    // 显示导入区域
+    document.getElementById('chatgpt-import-section').style.display = 'block';
+}
+
+// 隐藏ChatGPT提示
+function hideChatGPTPrompt() {
+    document.getElementById('chatgpt-prompt-result').style.display = 'none';
+    document.getElementById('chatgpt-import-section').style.display = 'none';
+}
+
+// 复制ChatGPT提示
+function copyChatGPTPrompt() {
+    if (!chatgptPrompt) {
+        showToast('没有可复制的提示内容', 'error');
+        return;
+    }
+
+    navigator.clipboard.writeText(chatgptPrompt).then(() => {
+        showToast('ChatGPT提示已复制到剪贴板', 'success');
+
+        // 提示用户下一步操作
+        setTimeout(() => {
+            showToast('请打开 https://chatgpt.com/ 并粘贴提示', 'warning');
+        }, 1500);
+    }).catch(err => {
+        console.error('复制失败:', err);
+        showToast('复制失败', 'error');
+    });
+}
+
+// 打开ChatGPT网站
+function openChatGPT() {
+    window.open('https://chatgpt.com/', '_blank');
+    showToast('ChatGPT网站已在新标签页打开', 'success');
+}
+
+// 步骤2: 导入ChatGPT审查结果
+async function importChatGPTResult() {
+    if (!chatgptFile) {
+        showToast('请先选择合同文件', 'error');
+        return;
+    }
+
+    const chatgptResponse = document.getElementById('chatgpt-response').value.trim();
+    if (!chatgptResponse) {
+        showToast('请输入ChatGPT的审查结果', 'error');
+        return;
+    }
+
+    // 验证ChatGPT响应格式
+    try {
+        // 清理响应（移除markdown代码块）
+        let cleanResponse = chatgptResponse.trim();
+        if (cleanResponse.startsWith('```json')) {
+            cleanResponse = cleanResponse.substring(7);
+        }
+        if (cleanResponse.startsWith('```')) {
+            cleanResponse = cleanResponse.substring(3);
+        }
+        if (cleanResponse.endsWith('```')) {
+            cleanResponse = cleanResponse.substring(0, cleanResponse.length - 3);
+        }
+
+        const parsed = JSON.parse(cleanResponse.trim());
+        if (!parsed.issues) {
+            throw new Error('ChatGPT响应缺少必需的issues字段');
+        }
+    } catch (e) {
+        showToast('ChatGPT响应格式错误，请检查JSON格式', 'error');
+        return;
+    }
+
+    const cleanupAnchors = document.getElementById('chatgpt-cleanup-anchors').checked;
+
+    // 显示加载状态
+    document.getElementById('chatgpt-import-loading').style.display = 'block';
+    hideChatGPTImport();
+
+    // 构建FormData
+    const formData = new FormData();
+    formData.append('file', chatgptFile);
+    formData.append('chatgptResponse', chatgptResponse);
+
+    try {
+        const url = `/chatgpt/import-result?cleanupAnchors=${cleanupAnchors}`;
+        const response = await fetch(url, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '导入审查结果失败');
+        }
+
+        // 下载批注后的文件
+        const blob = await response.blob();
+        const filename = chatgptFile.name.replace('.docx', '_ChatGPT审查.docx');
+        downloadFile(blob, filename);
+
+        showChatGPTImportResult(filename);
+        showToast('ChatGPT审查结果导入成功! 文档已下载', 'success');
+
+    } catch (error) {
+        console.error('导入ChatGPT审查结果失败:', error);
+        showToast('导入失败: ' + error.message, 'error');
+    } finally {
+        document.getElementById('chatgpt-import-loading').style.display = 'none';
+    }
+}
+
+// 显示ChatGPT导入结果
+function showChatGPTImportResult(filename) {
+    const resultBox = document.getElementById('chatgpt-import-result');
+    const summaryDiv = document.getElementById('chatgpt-import-summary');
+
+    summaryDiv.innerHTML = `
+        <div class="import-summary">
+            <p><strong>📄 文件名:</strong> ${filename}</p>
+            <p><strong>✅ 状态:</strong> ChatGPT审查结果导入成功</p>
+            <p><strong>📊 流程:</strong> 文件解析 → ChatGPT审查 → 结果导入 → 批注生成</p>
+            <p><strong>💡 说明:</strong> 审查意见已添加到合同相应段落</p>
+        </div>
+    `;
+
+    resultBox.style.display = 'block';
+}
+
+// 隐藏ChatGPT导入结果
+function hideChatGPTImport() {
+    document.getElementById('chatgpt-import-result').style.display = 'none';
+}
+
+// 重置ChatGPT表单
+function resetChatGPTForm() {
+    document.getElementById('chatgpt-file').value = '';
+    document.getElementById('chatgpt-file-name').textContent = '仅支持 .docx 格式';
+    document.getElementById('chatgpt-file-name').classList.remove('selected');
+    document.getElementById('chatgpt-response').value = '';
+    chatgptFile = null;
+    chatgptPrompt = null;
+    hideChatGPTPrompt();
+    hideChatGPTImport();
 }
