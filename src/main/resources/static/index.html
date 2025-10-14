@@ -20,6 +20,8 @@
             <div class="tabs">
                 <button class="tab-btn active" onclick="switchTab('parse')">📄 合同解析</button>
                 <button class="tab-btn" onclick="switchTab('annotate')">✍️ 合同批注</button>
+                <button class="tab-btn" onclick="switchTab('auto-review')">🚀 自动化审查</button>
+                <button class="tab-btn" onclick="switchTab('chatgpt')">💬 ChatGPT集成</button>
                 <button class="tab-btn" onclick="switchTab('standards')">📋 审查标准</button>
                 <button class="tab-btn" onclick="switchTab('prompt')">🤖 智能审查</button>
             </div>
@@ -136,6 +138,255 @@
                     <div class="spinner"></div>
                     <p>正在添加批注,请稍候...</p>
                 </div>
+            </div>
+
+            <!-- 自动化审查面板 -->
+            <div id="auto-review-panel" class="panel">
+                <div class="panel-header">
+                    <h2>🚀 一键自动化审查</h2>
+                    <p>上传合同 → AI智能审查 → 自动批注 → 输出结果文档</p>
+                </div>
+
+                <!-- AI服务状态提示 -->
+                <div id="ai-status-card" class="ai-status-card">
+                    <h4>⚙️ AI服务配置状态</h4>
+                    <div id="ai-status-content">
+                        <p>正在检查AI服务配置...</p>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="file-upload-label">
+                        <input type="file" id="auto-review-file" accept=".docx" onchange="handleAutoReviewFileSelect(this)">
+                        <span class="file-upload-btn">📁 选择合同文件</span>
+                        <span class="file-name" id="auto-review-file-name">仅支持 .docx 格式</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label for="auto-contract-type">合同类型:</label>
+                    <select id="auto-contract-type">
+                        <option value="general">通用合同</option>
+                        <option value="technology" selected>技术服务合同</option>
+                        <option value="purchase">采购合同</option>
+                        <option value="service">服务合同</option>
+                        <option value="agency">代理合同</option>
+                        <option value="employment">劳动合同</option>
+                        <option value="lease">租赁合同</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="ai-provider">AI服务提供商:</label>
+                    <select id="ai-provider">
+                        <option value="auto" selected>自动选择(优先Claude)</option>
+                        <option value="claude">Claude (Anthropic)</option>
+                        <option value="openai">OpenAI GPT</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="auto-cleanup-anchors" checked>
+                        <span>批注完成后清理锚点</span>
+                    </label>
+                </div>
+
+                <button class="btn btn-primary btn-large" onclick="startAutoReview()">
+                    <span class="btn-icon">🚀</span> 开始自动化审查
+                </button>
+
+                <div class="auto-review-process" id="auto-review-process" style="display: none;">
+                    <h4>审查进度</h4>
+                    <div class="process-steps">
+                        <div class="process-step" id="step-1">
+                            <span class="step-icon">⏳</span>
+                            <span class="step-text">1. 解析合同文件</span>
+                        </div>
+                        <div class="process-step" id="step-2">
+                            <span class="step-icon">⏳</span>
+                            <span class="step-text">2. AI智能审查</span>
+                        </div>
+                        <div class="process-step" id="step-3">
+                            <span class="step-icon">⏳</span>
+                            <span class="step-text">3. 插入批注</span>
+                        </div>
+                        <div class="process-step" id="step-4">
+                            <span class="step-icon">⏳</span>
+                            <span class="step-text">4. 生成文档</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="auto-review-result" class="result-box" style="display: none;">
+                    <h3>✅ 自动化审查完成</h3>
+                    <div id="auto-review-summary"></div>
+                    <p class="success-message">带AI批注的合同文档已自动下载!</p>
+                    <button class="btn btn-secondary" onclick="resetAutoReviewForm()">继续审查</button>
+                </div>
+
+                <div id="auto-review-loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>正在进行自动化审查,请稍候...</p>
+                    <p class="loading-tip">AI审查需要30-60秒,请耐心等待</p>
+                </div>
+            </div>
+
+            <!-- ChatGPT 网页版集成面板 -->
+            <div id="chatgpt-panel" class="panel">
+                <div class="panel-header">
+                    <h2>💬 ChatGPT 网页版集成</h2>
+                    <p>与 https://chatgpt.com/ 配合使用，实现合同智能审查</p>
+                </div>
+
+                <!-- 步骤说明 -->
+                <div class="chatgpt-workflow">
+                    <div class="workflow-steps">
+                        <div class="workflow-step">
+                            <div class="step-number">1</div>
+                            <div class="step-content">
+                                <h4>上传合同文件</h4>
+                                <p>选择要审查的 .docx 合同文件</p>
+                            </div>
+                        </div>
+                        <div class="workflow-arrow">→</div>
+                        <div class="workflow-step">
+                            <div class="step-number">2</div>
+                            <div class="step-content">
+                                <h4>生成ChatGPT提示</h4>
+                                <p>系统自动生成专业的审查提示</p>
+                            </div>
+                        </div>
+                        <div class="workflow-arrow">→</div>
+                        <div class="workflow-step">
+                            <div class="step-number">3</div>
+                            <div class="step-content">
+                                <h4>复制到ChatGPT</h4>
+                                <p>在 chatgpt.com 粘贴提示</p>
+                            </div>
+                        </div>
+                        <div class="workflow-arrow">→</div>
+                        <div class="workflow-step">
+                            <div class="step-number">4</div>
+                            <div class="step-content">
+                                <h4>导入审查结果</h4>
+                                <p>将ChatGPT回复导入生成批注</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 步骤1: 文件上传和提示生成 -->
+                <div class="chatgpt-section">
+                    <h3>📁 步骤1: 上传文件并生成ChatGPT提示</h3>
+
+                    <div class="form-group">
+                        <label class="file-upload-label">
+                            <input type="file" id="chatgpt-file" accept=".docx" onchange="handleChatGPTFileSelect(this)">
+                            <span class="file-upload-btn">📁 选择合同文件</span>
+                            <span class="file-name" id="chatgpt-file-name">仅支持 .docx 格式</span>
+                        </label>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="chatgpt-contract-type">合同类型:</label>
+                        <select id="chatgpt-contract-type">
+                            <option value="general">通用合同</option>
+                            <option value="technology" selected>技术服务合同</option>
+                            <option value="purchase">采购合同</option>
+                            <option value="service">服务合同</option>
+                            <option value="agency">代理合同</option>
+                            <option value="employment">劳动合同</option>
+                            <option value="lease">租赁合同</option>
+                        </select>
+                    </div>
+
+                    <button class="btn btn-primary" onclick="generateChatGPTPrompt()">
+                        <span class="btn-icon">🤖</span> 生成ChatGPT提示
+                    </button>
+
+                    <div id="chatgpt-generate-loading" class="loading" style="display: none;">
+                        <div class="spinner"></div>
+                        <p>正在生成ChatGPT提示...</p>
+                    </div>
+                </div>
+
+                <!-- ChatGPT提示结果 -->
+                <div id="chatgpt-prompt-result" class="result-box" style="display: none;">
+                    <h3>🤖 生成的ChatGPT提示</h3>
+                    <div id="chatgpt-instructions"></div>
+
+                    <div class="prompt-container">
+                        <pre id="chatgpt-prompt-content"></pre>
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn btn-primary" onclick="copyChatGPTPrompt()">
+                            <span class="btn-icon">📋</span> 复制提示
+                        </button>
+                        <button class="btn btn-secondary" onclick="openChatGPT()">
+                            <span class="btn-icon">🌐</span> 打开ChatGPT
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 步骤2: 导入ChatGPT审查结果 -->
+                <div id="chatgpt-import-section" class="chatgpt-section" style="display: none;">
+                    <h3>📥 步骤2: 导入ChatGPT审查结果</h3>
+
+                    <div class="form-group">
+                        <label for="chatgpt-response">ChatGPT审查结果:</label>
+                        <textarea
+                            id="chatgpt-response"
+                            rows="12"
+                            placeholder="请将ChatGPT的完整回复粘贴到这里（包括JSON格式的审查结果）..."
+                        ></textarea>
+                        <div class="input-help">
+                            💡 提示: 支持直接粘贴带有 ```json 代码块的回复，系统会自动清理格式
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chatgpt-cleanup-anchors" checked>
+                            <span>批注完成后清理锚点</span>
+                        </label>
+                    </div>
+
+                    <button class="btn btn-primary" onclick="importChatGPTResult()">
+                        <span class="btn-icon">📥</span> 导入并生成批注文档
+                    </button>
+
+                    <div id="chatgpt-import-loading" class="loading" style="display: none;">
+                        <div class="spinner"></div>
+                        <p>正在处理ChatGPT审查结果...</p>
+                    </div>
+                </div>
+
+                <!-- ChatGPT导入结果 -->
+                <div id="chatgpt-import-result" class="result-box" style="display: none;">
+                    <h3>✅ ChatGPT审查完成</h3>
+                    <div id="chatgpt-import-summary"></div>
+                    <p class="success-message">带ChatGPT批注的合同文档已自动下载!</p>
+                    <button class="btn btn-secondary" onclick="resetChatGPTForm()">继续审查</button>
+                </div>
+
+                <!-- ChatGPT 使用提示 -->
+                <div class="chatgpt-tips">
+                    <h4>💡 使用技巧</h4>
+                    <ul>
+                        <li>确保ChatGPT返回的是完整的JSON格式审查结果</li>
+                        <li>如果ChatGPT回复包含说明文字，系统会自动提取JSON部分</li>
+                        <li>支持复制包含 ```json 代码块的完整回复</li>
+                        <li>建议使用ChatGPT-4或更高版本获得更好的审查质量</li>
+                        <li>可以要求ChatGPT提供更详细的法律建议和风险分析</li>
+                    </ul>
+                </div>
+
+                <button class="btn btn-ghost" onclick="resetChatGPTForm()">
+                    <span class="btn-icon">🔄</span> 重新开始
+                </button>
+
             </div>
 
             <!-- 审查标准面板 -->

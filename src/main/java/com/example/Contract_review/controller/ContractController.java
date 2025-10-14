@@ -190,6 +190,55 @@ public class ContractController {
     }
 
     /**
+     * 测试批注定位接口
+     * 用于调试和测试批注定位功能
+     *
+     * POST /test-annotation
+     */
+    @PostMapping("/test-annotation")
+    public ResponseEntity<?> testAnnotation(@RequestParam("file") MultipartFile file) {
+        logger.info("收到批注定位测试请求: filename={}", file.getOriginalFilename());
+
+        try {
+            // 1. 解析文档获取条款
+            ParseResult parseResult = parseService.parseContract(file, "generate");
+
+            // 2. 创建测试用的审查结果
+            Map<String, Object> testReview = new HashMap<>();
+            Map<String, Object>[] issues = new Map[1];
+            issues[0] = new HashMap<>();
+            issues[0].put("clauseId", "c1");
+            issues[0].put("severity", "HIGH");
+            issues[0].put("category", "测试类别");
+            issues[0].put("finding", "这是一个测试批注");
+            issues[0].put("suggestion", "这是测试建议");
+            testReview.put("issues", issues);
+
+            String reviewJson = objectMapper.writeValueAsString(testReview);
+            logger.info("测试用审查JSON: {}", reviewJson);
+
+            // 3. 执行批注
+            byte[] annotatedDoc = annotateService.annotateContract(
+                    file, reviewJson, "textFallback", false);
+
+            // 4. 返回结果和调试信息
+            Map<String, Object> result = new HashMap<>();
+            result.put("parseResult", parseResult);
+            result.put("testReviewJson", reviewJson);
+            result.put("success", true);
+            result.put("message", "测试批注完成");
+            result.put("annotatedDocSize", annotatedDoc.length);
+
+            return ResponseEntity.ok(result);
+
+        } catch (Exception e) {
+            logger.error("批注定位测试失败", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorResponse("测试失败: " + e.getMessage()));
+        }
+    }
+
+    /**
      * 健康检查接口
      *
      * GET /health

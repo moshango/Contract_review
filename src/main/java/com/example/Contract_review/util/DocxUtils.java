@@ -97,13 +97,22 @@ public class DocxUtils {
         List<Clause> clauses = new ArrayList<>();
         int clauseCounter = 0;
 
+        logger.debug("开始提取条款: 总段落数={}, 生成锚点={}", paragraphs.size(), generateAnchors);
+
+        // 输出前10个段落用于调试
+        for (int i = 0; i < Math.min(10, paragraphs.size()); i++) {
+            logger.debug("段落[{}]: '{}'", i, paragraphs.get(i));
+        }
+
         for (int i = 0; i < paragraphs.size(); i++) {
             String text = paragraphs.get(i);
 
-            // 识别条款标题(包含"第"和"条"的段落)
+            // 识别条款标题
             if (isClauseHeading(text)) {
                 clauseCounter++;
                 String clauseId = "c" + clauseCounter;
+
+                logger.debug("发现条款标题[{}]: '{}'", i, text);
 
                 // 收集该条款的内容(从标题到下一个标题之前)
                 StringBuilder clauseText = new StringBuilder();
@@ -133,15 +142,18 @@ public class DocxUtils {
                 }
 
                 clauses.add(clause);
+                logger.debug("创建条款: id={}, 锚点={}, 段落范围=[{}-{}]",
+                           clauseId, clause.getAnchorId(), startIndex, endIndex);
             }
         }
 
+        logger.info("条款提取完成: 共找到{}个条款", clauses.size());
         return clauses;
     }
 
     /**
      * 判断段落是否为条款标题
-     * 简单规则:包含"第"和"条"的段落
+     * 增强规则：支持多种条款标题格式
      *
      * @param text 段落文本
      * @return 是否为条款标题
@@ -150,7 +162,50 @@ public class DocxUtils {
         if (text == null || text.isEmpty()) {
             return false;
         }
-        return text.contains("第") && text.contains("条");
+
+        // 标准化文本
+        String normalizedText = text.trim();
+
+        // 规则1：标准条款格式 - "第X条"
+        if (normalizedText.contains("第") && normalizedText.contains("条")) {
+            return true;
+        }
+
+        // 规则2：数字条款格式 - "1."、"2."、"1、"、"2、"
+        if (normalizedText.matches("^\\d+[.、].*")) {
+            return true;
+        }
+
+        // 规则3：罗马数字格式 - "I."、"II."、"III."等
+        if (normalizedText.matches("^[IVX]+[.、].*")) {
+            return true;
+        }
+
+        // 规则4：中文数字格式 - "一、"、"二、"、"三、"等
+        if (normalizedText.matches("^[一二三四五六七八九十百千]+[.、].*")) {
+            return true;
+        }
+
+        // 规则5：条款关键词
+        String[] keywords = {"条款", "协议", "合同条款", "合同内容", "权利义务", "责任", "违约", "争议解决"};
+        for (String keyword : keywords) {
+            if (normalizedText.contains(keyword) && normalizedText.length() < 50) {
+                return true;
+            }
+        }
+
+        // 规则6：标题样式检测 (长度较短且以冒号结尾)
+        if (normalizedText.length() < 30 && normalizedText.endsWith(":")) {
+            return true;
+        }
+
+        // 规则7：全大写或特殊标记的标题
+        if (normalizedText.matches("^[A-Z\\s]+$") && normalizedText.length() < 50) {
+            return true;
+        }
+
+        logger.debug("段落不符合条款标题规则: '{}'", normalizedText);
+        return false;
     }
 
     /**
@@ -225,6 +280,7 @@ public class DocxUtils {
 
     /**
      * 查找包含指定锚点的段落索引
+     * 增强版本：支持多种查找方式
      *
      * @param doc XWPFDocument对象
      * @param anchorId 锚点ID
@@ -233,37 +289,63 @@ public class DocxUtils {
     public int findParagraphByAnchor(XWPFDocument doc, String anchorId) {
         List<XWPFParagraph> paragraphs = doc.getParagraphs();
 
+        logger.debug("开始查找锚点: anchorId={}, 文档段落数={}", anchorId, paragraphs.size());
+
+        // 方法1：查找书签
         for (int i = 0; i < paragraphs.size(); i++) {
             XWPFParagraph para = paragraphs.get(i);
             org.openxmlformats.schemas.wordprocessingml.x2006.main.CTP ctp = para.getCTP();
 
             // 检查段落中的书签
-            if (ctp.getBookmarkStartList() != null) {
+            if (ctp.getBookmarkStartList() != null && !ctp.getBookmarkStartList().isEmpty()) {
                 for (org.openxmlformats.schemas.wordprocessingml.x2006.main.CTBookmark bookmark :
                      ctp.getBookmarkStartList()) {
                     if (anchorId.equals(bookmark.getName())) {
+                        logger.debug("通过书签找到锚点: anchorId={}, index={}", anchorId, i);
                         return i;
                     }
                 }
             }
         }
 
+        // 方法2：查找隐藏文本中的锚点标记（如果使用了其他锚点插入方式）
+        for (int i = 0; i < paragraphs.size(); i++) {
+            XWPFParagraph para = paragraphs.get(i);
+            String paraText = para.getText();
+
+            if (paraText != null && paraText.contains(anchorId)) {
+                logger.debug("通过文本内容找到锚点: anchorId={}, index={}, text={}", anchorId, i, paraText);
+                return i;
+            }
+        }
+
+        logger.debug("未找到锚点: anchorId={}", anchorId);
         return -1;
     }
 
     /**
      * 查找包含指定条款ID的段落索引
+     * 增强版本：支持更准确的条款定位
      *
      * @param clauses 条款列表
      * @param clauseId 条款ID
      * @return 段落索引,未找到返回-1
      */
     public int findParagraphByClauseId(List<Clause> clauses, String clauseId) {
+        logger.debug("开始查找条款ID: clauseId={}, 条款列表大小={}", clauseId, clauses.size());
+
         for (Clause clause : clauses) {
+            logger.debug("比较条款: 目标ID={}, 当前ID={}, 段落索引={}",
+                        clauseId, clause.getId(), clause.getStartParaIndex());
+
             if (clauseId.equals(clause.getId())) {
-                return clause.getStartParaIndex() != null ? clause.getStartParaIndex() : -1;
+                int index = clause.getStartParaIndex() != null ? clause.getStartParaIndex() : -1;
+                logger.debug("找到匹配条款: clauseId={}, index={}", clauseId, index);
+                return index;
             }
         }
+
+        logger.debug("未找到条款ID: clauseId={}", clauseId);
         return -1;
     }
 
