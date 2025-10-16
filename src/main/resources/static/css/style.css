@@ -683,6 +683,28 @@ textarea:focus {
     border-radius: 6px;
 }
 
+/* 豆包服务特殊样式 */
+.status-item.doubao {
+    background: linear-gradient(135deg, rgba(255, 165, 0, 0.3) 0%, rgba(255, 140, 0, 0.3) 100%);
+    border: 1px solid rgba(255, 165, 0, 0.4);
+    position: relative;
+}
+
+.status-item.doubao:after {
+    content: "🔥";
+    position: absolute;
+    top: 5px;
+    right: 8px;
+    font-size: 1.2rem;
+}
+
+.service-desc {
+    font-size: 0.75rem;
+    opacity: 0.8;
+    margin-top: 2px;
+    font-style: italic;
+}
+
 .model-name {
     display: block;
     font-size: 0.85rem;

@@ -15,7 +15,7 @@ import org.springframework.context.annotation.Configuration;
 public class AIServiceConfig {
 
     /**
-     * 默认使用的AI提供商: claude / openai / none
+     * 默认使用的AI提供商: claude / openai / doubao / mock / chatgpt-web / none
      */
     private String provider = "none";
 
@@ -28,6 +28,11 @@ public class AIServiceConfig {
      * OpenAI配置
      */
     private OpenAIConfig openai = new OpenAIConfig();
+
+    /**
+     * 豆包配置
+     */
+    private DouBaoConfig doubao = new DouBaoConfig();
 
     /**
      * 请求超时时间(秒)
@@ -113,6 +118,66 @@ public class AIServiceConfig {
         private int maxTokens = 4096;
     }
 
+    @Data
+    public static class DouBaoConfig {
+        /**
+         * 豆包 API密钥 (Bearer token方式)
+         */
+        private String apiKey;
+
+        /**
+         * 火山引擎 Access Key ID (签名认证方式)
+         */
+        private String accessKeyId;
+
+        /**
+         * 火山引擎 Secret Access Key (签名认证方式)
+         */
+        private String secretAccessKey;
+
+        /**
+         * 火山引擎区域
+         */
+        private String region = "cn-beijing";
+
+        /**
+         * API端点 - 火山引擎豆包大模型API
+         */
+        private String apiEndpoint = "https://ark.cn-beijing.volces.com/api/v3/chat/completions";
+
+        /**
+         * 使用的模型
+         */
+        private String model = "ep-20241014152622-vvjrn";
+
+        /**
+         * 最大tokens数
+         */
+        private int maxTokens = 4096;
+
+        /**
+         * 检查是否配置了API Key认证
+         */
+        public boolean hasApiKey() {
+            return apiKey != null && !apiKey.trim().isEmpty();
+        }
+
+        /**
+         * 检查是否配置了Access Key签名认证
+         */
+        public boolean hasAccessKey() {
+            return accessKeyId != null && !accessKeyId.trim().isEmpty() &&
+                   secretAccessKey != null && !secretAccessKey.trim().isEmpty();
+        }
+
+        /**
+         * 检查是否有任何有效的认证配置
+         */
+        public boolean hasValidAuth() {
+            return hasApiKey() || hasAccessKey();
+        }
+    }
+
     /**
      * 检查是否配置了AI服务
      */
@@ -121,6 +186,8 @@ public class AIServiceConfig {
             return claude.getApiKey() != null && !claude.getApiKey().isEmpty();
         } else if ("openai".equalsIgnoreCase(provider)) {
             return openai.getApiKey() != null && !openai.getApiKey().isEmpty();
+        } else if ("doubao".equalsIgnoreCase(provider)) {
+            return doubao.hasValidAuth();
         }
         return false;
     }

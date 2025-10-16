@@ -53,7 +53,7 @@ public class ContractParseService {
         boolean generateAnchors = "generate".equalsIgnoreCase(anchorMode) ||
                                   "regenerate".equalsIgnoreCase(anchorMode);
 
-        List<String> paragraphs;
+        List<Clause> clauses;
         String title;
         int wordCount;
         int paragraphCount;
@@ -61,21 +61,25 @@ public class ContractParseService {
         if (isDocx) {
             // 处理 .docx 文件
             XWPFDocument doc = docxUtils.loadDocx(file.getInputStream());
-            paragraphs = docxUtils.parseParagraphs(doc);
+
+            // 使用新的表格支持方法
+            clauses = docxUtils.extractClausesWithTables(doc, generateAnchors);
+
             title = docxUtils.extractTitle(doc);
             wordCount = docxUtils.countWords(doc);
             paragraphCount = docxUtils.countParagraphs(doc);
         } else {
-            // 处理 .doc 文件
+            // 处理 .doc 文件（旧格式不支持表格提取）
             HWPFDocument doc = docxUtils.loadDoc(file.getInputStream());
-            paragraphs = docxUtils.parseDocParagraphs(doc);
+            List<String> paragraphs = docxUtils.parseDocParagraphs(doc);
+            clauses = docxUtils.extractClauses(paragraphs, generateAnchors);
             title = paragraphs.isEmpty() ? "未命名文档" : paragraphs.get(0);
             wordCount = paragraphs.stream().mapToInt(String::length).sum();
             paragraphCount = paragraphs.size();
         }
 
-        // 提取条款
-        List<Clause> clauses = docxUtils.extractClauses(paragraphs, generateAnchors);
+        // 提取条款（原有逻辑已经整合到上面）
+        // List<Clause> clauses = docxUtils.extractClauses(paragraphs, generateAnchors);
 
         logger.info("解析完成: title={}, clauses={}, wordCount={}, paragraphCount={}",
                     title, clauses.size(), wordCount, paragraphCount);
@@ -121,9 +125,8 @@ public class ContractParseService {
         byte[] fileBytes = file.getBytes();
         XWPFDocument doc = docxUtils.loadDocx(new ByteArrayInputStream(fileBytes));
 
-        // 解析段落和条款
-        List<String> paragraphs = docxUtils.parseParagraphs(doc);
-        List<Clause> clauses = docxUtils.extractClauses(paragraphs, generateAnchors);
+        // 解析文档内容，支持表格
+        List<Clause> clauses = docxUtils.extractClausesWithTables(doc, generateAnchors);
 
         // 如果需要生成锚点,插入到文档中
         if (generateAnchors) {

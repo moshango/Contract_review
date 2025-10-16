@@ -6,6 +6,7 @@ import com.example.Contract_review.util.DocxUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -33,15 +34,23 @@ public class AutoReviewService {
     private AIServiceConfig aiServiceConfig;
 
     @Autowired(required = false)
+    @Qualifier("claudeReviewService")
     private AIReviewService claudeReviewService;
 
     @Autowired(required = false)
+    @Qualifier("openaiReviewService")
     private AIReviewService openaiReviewService;
 
     @Autowired(required = false)
+    @Qualifier("doubaoReviewService")
+    private AIReviewService doubaoReviewService;
+
+    @Autowired(required = false)
+    @Qualifier("mockReviewService")
     private AIReviewService mockReviewService;
 
     @Autowired(required = false)
+    @Qualifier("chatgptWebReviewService")
     private AIReviewService chatgptWebReviewService;
 
     @Autowired
@@ -191,6 +200,8 @@ public class AutoReviewService {
             return claudeReviewService;
         } else if ("openai".equalsIgnoreCase(aiProvider)) {
             return openaiReviewService;
+        } else if ("doubao".equalsIgnoreCase(aiProvider)) {
+            return doubaoReviewService;
         } else if ("mock".equalsIgnoreCase(aiProvider)) {
             return mockReviewService;
         } else if ("chatgpt-web".equalsIgnoreCase(aiProvider)) {
@@ -199,6 +210,8 @@ public class AutoReviewService {
             // 自动选择：优先使用已配置的服务
             if (claudeReviewService != null && claudeReviewService.isAvailable()) {
                 return claudeReviewService;
+            } else if (doubaoReviewService != null && doubaoReviewService.isAvailable()) {
+                return doubaoReviewService;
             } else if (openaiReviewService != null && openaiReviewService.isAvailable()) {
                 return openaiReviewService;
             } else if (chatgptWebReviewService != null && chatgptWebReviewService.isAvailable()) {
@@ -213,6 +226,8 @@ public class AutoReviewService {
                 return claudeReviewService;
             } else if ("openai".equalsIgnoreCase(defaultProvider) && openaiReviewService != null) {
                 return openaiReviewService;
+            } else if ("doubao".equalsIgnoreCase(defaultProvider) && doubaoReviewService != null) {
+                return doubaoReviewService;
             } else if ("mock".equalsIgnoreCase(defaultProvider) && mockReviewService != null) {
                 return mockReviewService;
             } else if ("chatgpt-web".equalsIgnoreCase(defaultProvider) && chatgptWebReviewService != null) {
@@ -250,6 +265,23 @@ public class AutoReviewService {
         openaiStatus.put("model", aiServiceConfig.getOpenai().getModel());
         status.put("openai", openaiStatus);
 
+        Map<String, Object> doubaoStatus = new HashMap<>();
+        doubaoStatus.put("available", doubaoReviewService != null && doubaoReviewService.isAvailable());
+        doubaoStatus.put("configured", aiServiceConfig.getDoubao().hasValidAuth());
+        doubaoStatus.put("model", aiServiceConfig.getDoubao().getModel());
+        doubaoStatus.put("description", "火山引擎豆包大模型");
+
+        // 添加认证方式信息
+        if (aiServiceConfig.getDoubao().hasApiKey()) {
+            doubaoStatus.put("authType", "API Key认证");
+        } else if (aiServiceConfig.getDoubao().hasAccessKey()) {
+            doubaoStatus.put("authType", "Access Key签名认证");
+        } else {
+            doubaoStatus.put("authType", "未配置认证");
+        }
+
+        status.put("doubao", doubaoStatus);
+
         Map<String, Object> mockStatus = new HashMap<>();
         mockStatus.put("available", mockReviewService != null && mockReviewService.isAvailable());
         mockStatus.put("configured", true); // 模拟服务不需要配置
@@ -265,6 +297,7 @@ public class AutoReviewService {
 
         boolean anyAvailable = (claudeReviewService != null && claudeReviewService.isAvailable())
                             || (openaiReviewService != null && openaiReviewService.isAvailable())
+                            || (doubaoReviewService != null && doubaoReviewService.isAvailable())
                             || (mockReviewService != null && mockReviewService.isAvailable())
                             || (chatgptWebReviewService != null && chatgptWebReviewService.isAvailable());
         status.put("autoReviewAvailable", anyAvailable);

@@ -3,6 +3,7 @@ package com.example.Contract_review.controller;
 import com.example.Contract_review.model.ParseResult;
 import com.example.Contract_review.service.ContractAnnotateService;
 import com.example.Contract_review.service.ContractParseService;
+import com.example.Contract_review.service.XmlContractAnnotateService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +26,7 @@ import java.util.Map;
  * 提供 /parse 和 /annotate 两个主要接口
  */
 @RestController
-@RequestMapping
+@RequestMapping("/api")
 public class ContractController {
 
     private static final Logger logger = LoggerFactory.getLogger(ContractController.class);
@@ -35,6 +36,9 @@ public class ContractController {
 
     @Autowired
     private ContractAnnotateService annotateService;
+
+    @Autowired
+    private XmlContractAnnotateService xmlAnnotateService;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -190,6 +194,75 @@ public class ContractController {
     }
 
     /**
+     * 合同批注接口（基于XML操作）
+     *
+     * POST /annotate-xml
+     *
+     * @param file 原始合同文件
+     * @param review 审查结果JSON(可以是字符串或文件)
+     * @param anchorStrategy 锚点定位策略: preferAnchor, anchorOnly, textFallback (默认: preferAnchor)
+     * @param cleanupAnchors 是否清理锚点 (默认: false)
+     * @return 带批注的文档文件
+     */
+    @PostMapping("/annotate-xml")
+    public ResponseEntity<?> annotateContractWithXml(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("review") String review,
+            @RequestParam(value = "anchorStrategy", defaultValue = "preferAnchor") String anchorStrategy,
+            @RequestParam(value = "cleanupAnchors", defaultValue = "false") boolean cleanupAnchors) {
+
+        logger.info("收到XML批注请求: filename={}, anchorStrategy={}, cleanupAnchors={}",
+                    file.getOriginalFilename(), anchorStrategy, cleanupAnchors);
+
+        try {
+            // 验证文件大小
+            if (file.getSize() > 50 * 1024 * 1024) {
+                return ResponseEntity.badRequest()
+                        .body(errorResponse("文件大小超过50MB限制"));
+            }
+
+            // 验证文件格式
+            String filename = file.getOriginalFilename();
+            if (filename == null || !filename.toLowerCase().endsWith(".docx")) {
+                return ResponseEntity.badRequest()
+                        .body(errorResponse("XML批注功能仅支持 .docx 格式文件"));
+            }
+
+            // 验证审查结果JSON
+            if (review == null || review.trim().isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(errorResponse("review 参数不能为空"));
+            }
+
+            // 验证JSON格式
+            if (!xmlAnnotateService.validateReviewJson(review)) {
+                return ResponseEntity.badRequest()
+                        .body(errorResponse("review JSON格式无效"));
+            }
+
+            // 执行XML批注
+            byte[] annotatedDoc = xmlAnnotateService.annotateContractWithXml(
+                    file, review, anchorStrategy, cleanupAnchors);
+
+            // 返回带批注的文档
+            String outputFilename = filename.replace(".docx", "_xml_annotated.docx");
+            return buildFileResponse(annotatedDoc, outputFilename);
+
+        } catch (IllegalArgumentException e) {
+            logger.error("参数错误", e);
+            return ResponseEntity.badRequest().body(errorResponse(e.getMessage()));
+        } catch (IOException e) {
+            logger.error("文件处理失败", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorResponse("文件处理失败: " + e.getMessage()));
+        } catch (Exception e) {
+            logger.error("XML批注失败", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorResponse("XML批注失败: " + e.getMessage()));
+        }
+    }
+
+    /**
      * 测试批注定位接口
      * 用于调试和测试批注定位功能
      *
@@ -236,6 +309,100 @@ public class ContractController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(errorResponse("测试失败: " + e.getMessage()));
         }
+    }
+
+    /**
+     * API使用说明接口
+     *
+     * GET /api
+     */
+    @GetMapping
+    public ResponseEntity<Map<String, Object>> apiInfo() {
+        Map<String, Object> response = new HashMap<>();
+        response.put("service", "AI Contract Review Assistant");
+        response.put("version", "1.0.0");
+        response.put("description", "AI驱动的合同审查系统");
+
+        Map<String, Object> endpoints = new HashMap<>();
+
+        Map<String, Object> parseEndpoint = new HashMap<>();
+        parseEndpoint.put("method", "POST");
+        parseEndpoint.put("path", "/api/parse");
+        parseEndpoint.put("description", "解析合同文档，提取条款结构");
+        parseEndpoint.put("parameters", Map.of(
+            "file", "上传的合同文件 (.docx/.doc)",
+            "anchors", "锚点模式: none|generate|regenerate (可选，默认: none)",
+            "returnMode", "返回模式: json|file|both (可选，默认: json)"
+        ));
+        endpoints.put("parse", parseEndpoint);
+
+        Map<String, Object> annotateEndpoint = new HashMap<>();
+        annotateEndpoint.put("method", "POST");
+        annotateEndpoint.put("path", "/api/annotate");
+        annotateEndpoint.put("description", "在合同中插入AI审查批注（POI方式）");
+        annotateEndpoint.put("parameters", Map.of(
+            "file", "原始合同文件 (.docx)",
+            "review", "审查结果JSON字符串",
+            "anchorStrategy", "锚点定位策略: preferAnchor|anchorOnly|textFallback (可选，默认: preferAnchor)",
+            "cleanupAnchors", "是否清理锚点: true|false (可选，默认: false)"
+        ));
+        endpoints.put("annotate", annotateEndpoint);
+
+        Map<String, Object> annotateXmlEndpoint = new HashMap<>();
+        annotateXmlEndpoint.put("method", "POST");
+        annotateXmlEndpoint.put("path", "/api/annotate-xml");
+        annotateXmlEndpoint.put("description", "在合同中插入AI审查批注（纯XML方式，右侧批注）");
+        annotateXmlEndpoint.put("parameters", Map.of(
+            "file", "原始合同文件 (.docx)",
+            "review", "审查结果JSON字符串",
+            "anchorStrategy", "锚点定位策略: preferAnchor|anchorOnly|textFallback (可选，默认: preferAnchor)",
+            "cleanupAnchors", "是否清理锚点: true|false (可选，默认: false)"
+        ));
+        endpoints.put("annotate-xml", annotateXmlEndpoint);
+
+        Map<String, Object> healthEndpoint = new HashMap<>();
+        healthEndpoint.put("method", "GET");
+        healthEndpoint.put("path", "/api/health");
+        healthEndpoint.put("description", "健康检查");
+        endpoints.put("health", healthEndpoint);
+
+        response.put("endpoints", endpoints);
+
+        Map<String, String> examples = new HashMap<>();
+        examples.put("curl_parse", "curl -X POST -F \"file=@contract.docx\" http://localhost:8080/api/parse");
+        examples.put("curl_annotate", "curl -X POST -F \"file=@contract.docx\" -F \"review={\\\"issues\\\":[]}\" http://localhost:8080/api/annotate");
+        examples.put("curl_annotate_xml", "curl -X POST -F \"file=@contract.docx\" -F \"review={\\\"issues\\\":[]}\" http://localhost:8080/api/annotate-xml");
+        response.put("examples", examples);
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 处理GET方法访问parse端点的错误
+     */
+    @GetMapping("/parse")
+    public ResponseEntity<Map<String, Object>> parseGetError() {
+        Map<String, Object> error = new HashMap<>();
+        error.put("error", "方法不支持");
+        error.put("message", "/api/parse 端点仅支持 POST 方法");
+        error.put("correct_method", "POST");
+        error.put("example", "curl -X POST -F \"file=@contract.docx\" http://localhost:8080/api/parse");
+        error.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(error);
+    }
+
+    /**
+     * 处理GET方法访问annotate端点的错误
+     */
+    @GetMapping("/annotate")
+    public ResponseEntity<Map<String, Object>> annotateGetError() {
+        Map<String, Object> error = new HashMap<>();
+        error.put("error", "方法不支持");
+        error.put("message", "/api/annotate 端点仅支持 POST 方法");
+        error.put("correct_method", "POST");
+        error.put("example", "curl -X POST -F \"file=@contract.docx\" -F \"review={\\\"issues\\\":[]}\" http://localhost:8080/api/annotate");
+        error.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(error);
     }
 
     /**
