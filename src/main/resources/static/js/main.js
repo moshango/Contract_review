@@ -554,11 +554,17 @@ function displayAIServiceStatus(status) {
 
     const claudeStatus = status.claude.available ? '✅ 已配置' : '❌ 未配置';
     const openaiStatus = status.openai.available ? '✅ 已配置' : '❌ 未配置';
+    const doubaoStatus = status.doubao && status.doubao.available ? '✅ 已配置' : '❌ 未配置';
     const mockStatus = status.mock && status.mock.available ? '✅ 可用' : '❌ 不可用';
     const chatgptWebStatus = status.chatgptWeb && status.chatgptWeb.available ? '✅ 可用' : '❌ 不可用';
 
     let html = `
         <div class="status-grid">
+            <div class="status-item doubao">
+                <strong>豆包 (火山引擎):</strong> ${doubaoStatus}
+                ${status.doubao && status.doubao.available ? `<span class="model-name">(${status.doubao.model})</span>` : ''}
+                ${status.doubao && status.doubao.description ? `<div class="service-desc">${status.doubao.description}</div>` : ''}
+            </div>
             <div class="status-item">
                 <strong>Claude:</strong> ${claudeStatus}
                 ${status.claude.available ? `<span class="model-name">(${status.claude.model})</span>` : ''}
@@ -582,7 +588,7 @@ function displayAIServiceStatus(status) {
         html += `
             <div class="warning-box">
                 <p>⚠️ 未配置AI服务，请配置API密钥或使用模拟/ChatGPT网页版</p>
-                <p class="config-hint">可选择: Claude API、OpenAI API、模拟服务或ChatGPT网页版</p>
+                <p class="config-hint">可选择: 豆包API、Claude API、OpenAI API、模拟服务或ChatGPT网页版</p>
             </div>
         `;
     } else {

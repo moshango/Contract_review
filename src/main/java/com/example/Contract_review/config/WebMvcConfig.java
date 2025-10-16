@@ -1,13 +1,14 @@
 package com.example.Contract_review.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.PathMatchConfigurer;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
  * Web MVC配置
- *
- * 配置默认首页和静态资源访问
+ * 处理静态资源、路径匹配和默认首页
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
@@ -19,5 +20,27 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
         registry.addViewController("/").setViewName("forward:/index.html");
+    }
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        // 明确配置静态资源处理，避免 /api 路径被误认为静态资源
+        registry.addResourceHandler("/static/**")
+                .addResourceLocations("classpath:/static/");
+
+        registry.addResourceHandler("/css/**")
+                .addResourceLocations("classpath:/static/css/");
+
+        registry.addResourceHandler("/js/**")
+                .addResourceLocations("classpath:/static/js/");
+
+        registry.addResourceHandler("/index.html")
+                .addResourceLocations("classpath:/static/index.html");
+    }
+
+    @Override
+    public void configurePathMatch(PathMatchConfigurer configurer) {
+        // 确保 /api 路径能正确匹配到控制器
+        configurer.setUseTrailingSlashMatch(true);
     }
 }

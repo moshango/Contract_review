@@ -22,9 +22,9 @@ public class WebClientConfig {
     public RestTemplate restTemplate() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
 
-        // 设置超时时间（毫秒）
-        factory.setConnectTimeout(60000);  // 60秒连接超时
-        factory.setReadTimeout(120000);    // 120秒读取超时
+        // 设置超时时间（毫秒） - 优化超时设置
+        factory.setConnectTimeout(15000);   // 15秒连接超时（直连更快）
+        factory.setReadTimeout(120000);     // 120秒读取超时
 
         // 如果配置了代理，则使用代理；否则明确禁用代理
         if (aiServiceConfig.getProxy().isEnabled()) {
