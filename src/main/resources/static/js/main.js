@@ -71,7 +71,7 @@ async function parseContract() {
     formData.append('file', parseFile);
 
     try {
-        const url = `/parse?anchors=${anchorMode}&returnMode=${returnMode}`;
+        const url = `/api/parse?anchors=${anchorMode}&returnMode=${returnMode}`;
         const response = await fetch(url, {
             method: 'POST',
             body: formData
@@ -142,7 +142,7 @@ async function annotateContract() {
     formData.append('review', reviewJson);
 
     try {
-        const url = `/annotate?anchorStrategy=${anchorStrategy}&cleanupAnchors=${cleanupAnchors}`;
+        const url = `/api/annotate?anchorStrategy=${anchorStrategy}&cleanupAnchors=${cleanupAnchors}`;
         const response = await fetch(url, {
             method: 'POST',
             body: formData
@@ -255,7 +255,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // 检查API健康状态
 async function checkHealth() {
     try {
-        const response = await fetch('/health');
+        const response = await fetch('/api/health');
         const data = await response.json();
         console.log('API状态:', data);
 
