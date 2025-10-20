@@ -704,35 +704,97 @@ public class WordXmlCommentProcessor {
                 return;
             }
 
-            // 4. 使用简化方案：直接插入批注标记（不分割Run）
-            // 原因：Run分割涉及复杂的XML操作，可能导致dom4j内部状态不一致
-            // 更安全的方式：在单Run匹配时，在Run前后插入批注标记（类似当前行为）
+            // 4. 实现精确的Run分割：将原Run替换为三个Run
 
-            logger.debug("单Run内匹配检测到：startOffset={}, endOffset={}, 使用降级方案",
-                       startOffset, endOffset);
+            // 获取原Run的格式属性（runProperties）
+            Element originalRunProperties = null;
+            List<Element> rpElements = originalRun.elements(QName.get("rPr", W_NS));
+            if (!rpElements.isEmpty()) {
+                originalRunProperties = rpElements.get(0);
+                logger.debug("检测到Run格式属性，将应用到分割后的Run");
+            }
 
-            // 在Run前插入commentRangeStart
+            // Step 1: 创建前缀Run（如果有）
+            Element prefixRun = null;
+            if (!prefix.isEmpty()) {
+                prefixRun = new org.dom4j.tree.DefaultElement(QName.get("r", W_NS));
+                if (originalRunProperties != null) {
+                    // 复制Run的格式属性到前缀Run
+                    List<Element> propChildren = originalRunProperties.elements();
+                    for (Element propChild : propChildren) {
+                        prefixRun.add(propChild.createCopy());
+                    }
+                }
+                Element prefixText = prefixRun.addElement(QName.get("t", W_NS));
+                prefixText.setText(prefix);
+                prefixText.addAttribute("xml:space", "preserve");
+                paragraph.elements().add(runIndex, prefixRun);
+                runIndex++;
+                logger.debug("创建前缀Run：'{}'", prefix.length() > 30 ? prefix.substring(0, 30) + "..." : prefix);
+            }
+
+            // Step 2: 在匹配部分前插入commentRangeStart
             Element commentRangeStart = new org.dom4j.tree.DefaultElement(QName.get("commentRangeStart", W_NS));
             commentRangeStart.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
             paragraph.elements().add(runIndex, commentRangeStart);
+            runIndex++;
+            logger.debug("插入commentRangeStart");
 
-            // 在Run后插入commentRangeEnd
-            // 注意：由于已添加了commentRangeStart，需要重新获取Run的位置
+            // Step 3: 创建匹配Run（修改原Run的文本内容）
+            // 清空原Run中的文本元素
+            List<Element> textElements = originalRun.elements(QName.get("t", W_NS));
+            for (Element textElem : new ArrayList<>(textElements)) {
+                textElem.getParent().remove(textElem);
+            }
+
+            // 在原Run中插入新的文本（匹配部分）
+            Element matchedText = originalRun.addElement(QName.get("t", W_NS));
+            matchedText.setText(matched);
+            matchedText.addAttribute("xml:space", "preserve");
+            logger.debug("修改原Run文本为匹配部分：'{}'", matched.length() > 30 ? matched.substring(0, 30) + "..." : matched);
+
+            // Step 4: 在匹配部分后插入commentRangeEnd
+            // 重新获取originalRun的位置（因为已经添加了元素）
             allElements = paragraph.elements();
-            runIndex = allElements.indexOf(originalRun);
+            int originalRunNewIndex = allElements.indexOf(originalRun);
 
             Element commentRangeEnd = new org.dom4j.tree.DefaultElement(QName.get("commentRangeEnd", W_NS));
             commentRangeEnd.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
-            paragraph.elements().add(runIndex + 1, commentRangeEnd);
+            paragraph.elements().add(originalRunNewIndex + 1, commentRangeEnd);
+            logger.debug("插入commentRangeEnd");
 
-            // 添加批注引用
+            // Step 5: 创建后缀Run（如果有）
+            if (!suffix.isEmpty()) {
+                Element suffixRun = new org.dom4j.tree.DefaultElement(QName.get("r", W_NS));
+                if (originalRunProperties != null) {
+                    // 复制Run的格式属性到后缀Run
+                    List<Element> propChildren = originalRunProperties.elements();
+                    for (Element propChild : propChildren) {
+                        suffixRun.add(propChild.createCopy());
+                    }
+                }
+                Element suffixText = suffixRun.addElement(QName.get("t", W_NS));
+                suffixText.setText(suffix);
+                suffixText.addAttribute("xml:space", "preserve");
+
+                // 在commentRangeEnd后插入suffixRun
+                allElements = paragraph.elements();
+                int commentRangeEndIndex = allElements.indexOf(commentRangeEnd);
+                paragraph.elements().add(commentRangeEndIndex + 1, suffixRun);
+                logger.debug("创建后缀Run：'{}'", suffix.length() > 30 ? suffix.substring(0, 30) + "..." : suffix);
+            }
+
+            // Step 6: 添加批注引用
             Element commentRefRun = new org.dom4j.tree.DefaultElement(QName.get("r", W_NS));
             Element commentReference = commentRefRun.addElement(QName.get("commentReference", W_NS));
             commentReference.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
             paragraph.elements().add(commentRefRun);
 
-            logger.info("✓ 单Run内匹配处理完成：commentId={}, 文本范围={}-{}",
-                       commentId, startOffset, endOffset);
+            logger.info("✓ 精确批注插入完成：commentId={}, 前缀={}, 匹配范围={}-{}, 后缀={}",
+                       commentId,
+                       prefix.isEmpty() ? "无" : prefix.length(),
+                       startOffset, endOffset,
+                       suffix.isEmpty() ? "无" : suffix.length());
 
         } catch (Exception e) {
             logger.error("Run分割失败，降级到段落级别", e);
