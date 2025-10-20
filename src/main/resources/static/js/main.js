@@ -71,33 +71,66 @@ async function parseContract() {
     formData.append('file', parseFile);
 
     try {
-        const url = `/api/parse?anchors=${anchorMode}&returnMode=${returnMode}`;
-        const response = await fetch(url, {
-            method: 'POST',
-            body: formData
-        });
+        // 当选择 both 模式时，先获取 JSON，再获取文件
+        if (returnMode === 'both') {
+            // 第一步: 获取 JSON 结果
+            const jsonUrl = `/api/parse?anchors=${anchorMode}&returnMode=json`;
+            const jsonResponse = await fetch(jsonUrl, {
+                method: 'POST',
+                body: formData
+            });
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || '解析失败');
-        }
+            if (!jsonResponse.ok) {
+                const errorData = await jsonResponse.json();
+                throw new Error(errorData.error || '解析失败');
+            }
 
-        // 根据返回模式处理响应
-        if (returnMode === 'json') {
-            const data = await response.json();
+            const data = await jsonResponse.json();
             showParseResult(data);
-            showToast('解析成功!', 'success');
-        } else if (returnMode === 'file' || returnMode === 'both') {
-            const blob = await response.blob();
-            const filename = `parsed-${parseFile.name}`;
-            downloadFile(blob, filename);
-            showToast('解析成功! 文档已下载', 'success');
+            showToast('JSON结果已加载', 'success');
 
-            // 如果是both模式,提示用户
-            if (returnMode === 'both') {
-                setTimeout(() => {
-                    showToast('JSON结果可通过API直接获取', 'warning');
-                }, 2000);
+            // 第二步: 获取带锚点的文件
+            const fileUrl = `/api/parse?anchors=${anchorMode}&returnMode=file`;
+            // 需要重新创建FormData，因为第一次请求已经消耗了
+            const formData2 = new FormData();
+            formData2.append('file', parseFile);
+
+            const fileResponse = await fetch(fileUrl, {
+                method: 'POST',
+                body: formData2
+            });
+
+            if (fileResponse.ok) {
+                const blob = await fileResponse.blob();
+                const filename = `parsed-${parseFile.name}`;
+                downloadFile(blob, filename);
+                showToast('文档已下载', 'success');
+            } else {
+                console.warn('文件下载失败，但JSON已成功加载');
+            }
+        } else {
+            // JSON 或 FILE 模式
+            const url = `/api/parse?anchors=${anchorMode}&returnMode=${returnMode}`;
+            const response = await fetch(url, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || '解析失败');
+            }
+
+            // 根据返回模式处理响应
+            if (returnMode === 'json') {
+                const data = await response.json();
+                showParseResult(data);
+                showToast('解析成功!', 'success');
+            } else if (returnMode === 'file') {
+                const blob = await response.blob();
+                const filename = `parsed-${parseFile.name}`;
+                downloadFile(blob, filename);
+                showToast('解析成功! 文档已下载', 'success');
             }
         }
     } catch (error) {

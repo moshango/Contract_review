@@ -27,7 +27,87 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * 基于OpenXML纯XML修改的Word批注处理器
  *
- * 直接操作OOXML格式的XML文件，实现右侧批注功能：
+ * 直接操作OOXML格式的XML文件，实现右侧批注功能，支持多级精确定位：
+ *
+ * ======================== 批注定位三层架构 ========================
+ *
+ * 第1层：锚点定位（Anchor Positioning）
+ *   - 查找段落中的书签（bookmarkStart）
+ *   - 匹配anchorId（例如：anc-c1-4f21）
+ *   - 用于精确定位到解析时生成的条款位置
+ *   - 参考方法：findParagraphByAnchor()
+ *
+ * 第2层：文字匹配（Text Matching）
+ *   - 在锚点标记的段落内，使用PreciseTextAnnotationLocator进行精确匹配
+ *   - 支持三种匹配模式：
+ *     * EXACT: 精确匹配完整文字
+ *     * CONTAINS: 包含关键词匹配（允许重叠）
+ *     * REGEX: 正则表达式匹配
+ *   - 通过targetText和matchPattern字段指定要匹配的内容
+ *   - 参考方法：preciseLocator.findTextInParagraph()
+ *
+ * 第3层：精确批注插入（Precise Annotation Insertion）
+ *   - 将文字匹配结果映射到具体的Run元素
+ *   - 在精确的Run位置插入批注范围标记（commentRangeStart/End）
+ *   - 若匹配失败，自动降级到段落级别批注
+ *   - 参考方法：insertPreciseCommentRange()
+ *
+ * ======================== 工作流程 ========================
+ *
+ * 输入：ReviewIssue 包含以下关键字段
+ *   - anchorId: 锚点ID（例如：anc-c1-4f21）
+ *   - clauseId: 条款ID（例如：c1）
+ *   - targetText: 要批注的精确文字（例如："甲方应在损害事实发生后30天内承担赔偿责任"）
+ *   - matchPattern: 匹配模式（EXACT|CONTAINS|REGEX，默认EXACT）
+ *   - matchIndex: 如果有多个匹配，选择第几个（默认1）
+ *
+ * 处理流程：
+ *   1. 根据anchorStrategy查找目标段落
+ *      - preferAnchor: 优先用anchorId，失败则用clauseId文本匹配
+ *      - anchorOnly: 仅用anchorId查找
+ *      - textFallback: 优先用anchorId，失败则用clauseId
+ *   2. 若提供了targetText，使用PreciseTextAnnotationLocator在段落内匹配
+ *   3. 匹配成功：使用insertPreciseCommentRange()在精确位置插入批注
+ *   4. 匹配失败：自动降级到insertCommentRangeInDocument()进行段落级别批注
+ *   5. 将批注内容添加到comments.xml
+ *
+ * ======================== 关键特性 ========================
+ *
+ * ✓ 精确到字符级别：支持在Word中精确标记需要批注的文字范围
+ * ✓ 多级回退：匹配失败自动降级，确保系统稳定性
+ * ✓ 灵活的匹配模式：满足不同的文字定位需求
+ * ✓ 锚点同步：通过锚点实现解析与批注的精确同步
+ * ✓ 可清理锚点：批注完成后可选择清理锚点标记
+ *
+ * ======================== 使用示例 ========================
+ *
+ * 示例1：精确匹配完整句子
+ * {
+ *   "anchorId": "anc-c2-8f3a",
+ *   "clauseId": "c2",
+ *   "finding": "赔偿责任不清晰",
+ *   "targetText": "甲方应在损害事实发生后30天内承担赔偿责任",
+ *   "matchPattern": "EXACT"
+ * }
+ *
+ * 示例2：包含关键词匹配
+ * {
+ *   "anchorId": "anc-c3-9f4b",
+ *   "clauseId": "c3",
+ *   "finding": "保密期限不明确",
+ *   "targetText": "保密期限",
+ *   "matchPattern": "CONTAINS"
+ * }
+ *
+ * 示例3：正则表达式匹配
+ * {
+ *   "anchorId": "anc-c1-4f21",
+ *   "clauseId": "c1",
+ *   "finding": "数字不一致",
+ *   "targetText": "\\d{1,3}[,.]\\d{1,2}[万元]",
+ *   "matchPattern": "REGEX"
+ * }
+ *
  * - word/document.xml: 插入批注标记
  * - word/comments.xml: 创建/更新批注内容
  * - word/_rels/document.xml.rels: 管理文档关系
@@ -158,8 +238,28 @@ public class WordXmlCommentProcessor {
     }
 
     /**
-     * 为单个问题添加批注
-     * 支持精确文字匹配和段落级别批注两种模式
+     * 为单个问题添加批注 - 实现多级定位架构
+     *
+     * 这个方法是批注定位三层架构的核心实现：
+     *
+     * Step 1 - 锚点定位：根据anchorStrategy和anchorId查找目标段落
+     *          若anchorId存在于书签中，直接返回该段落
+     *          否则按clauseId进行文本匹配
+     *
+     * Step 2 - 文字匹配：若ReviewIssue中提供了targetText字段
+     *          使用PreciseTextAnnotationLocator在段落内进行精确匹配
+     *          支持EXACT、CONTAINS、REGEX三种匹配模式
+     *
+     * Step 3 - 精确插入：
+     *          若文字匹配成功，在精确的Run位置插入批注标记（精确位置）
+     *          若文字匹配失败，降级到段落开始/结束位置插入批注标记（段落级别）
+     *          这样可以确保系统稳定性，同时优先使用精确定位
+     *
+     * @param documentXml 文档XML对象
+     * @param commentsXml 批注XML对象
+     * @param issue 审查问题，包含anchorId、targetText等定位信息
+     * @param anchorStrategy 锚点策略：preferAnchor|anchorOnly|textFallback
+     * @return true if successfully added, false otherwise
      */
     private boolean addCommentForIssue(Document documentXml, Document commentsXml,
                                       ReviewIssue issue, String anchorStrategy) {

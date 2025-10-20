@@ -131,12 +131,17 @@ public class ContractController {
     }
 
     /**
-     * 合同批注接口
+     * 合同批注接口 - 基于XML实现
+     *
+     * 使用XML方式实现右侧批注，支持多级定位：
+     * 1. 按锚点查找段落
+     * 2. 在锚点标记的内容中进行文字匹配（targetText）
+     * 3. 在精确位置插入批注
      *
      * POST /annotate
      *
      * @param file 原始合同文件
-     * @param review 审查结果JSON(可以是字符串或文件)
+     * @param review 审查结果JSON(包含 targetText、matchPattern 等精确定位信息)
      * @param anchorStrategy 锚点定位策略: preferAnchor, anchorOnly, textFallback (默认: preferAnchor)
      * @param cleanupAnchors 是否清理锚点 (默认: false)
      * @return 带批注的文档文件
@@ -148,7 +153,7 @@ public class ContractController {
             @RequestParam(value = "anchorStrategy", defaultValue = "preferAnchor") String anchorStrategy,
             @RequestParam(value = "cleanupAnchors", defaultValue = "false") boolean cleanupAnchors) {
 
-        logger.info("收到批注请求: filename={}, anchorStrategy={}, cleanupAnchors={}",
+        logger.info("收到XML批注请求: filename={}, anchorStrategy={}, cleanupAnchors={}",
                     file.getOriginalFilename(), anchorStrategy, cleanupAnchors);
 
         try {
@@ -171,8 +176,14 @@ public class ContractController {
                         .body(errorResponse("review 参数不能为空"));
             }
 
-            // 执行批注
-            byte[] annotatedDoc = annotateService.annotateContract(
+            // 验证JSON格式
+            if (!xmlAnnotateService.validateReviewJson(review)) {
+                return ResponseEntity.badRequest()
+                        .body(errorResponse("review JSON格式无效"));
+            }
+
+            // 执行XML批注（支持多级定位：锚点 → 文字匹配 → 精确插入）
+            byte[] annotatedDoc = xmlAnnotateService.annotateContractWithXml(
                     file, review, anchorStrategy, cleanupAnchors);
 
             // 返回带批注的文档
@@ -187,9 +198,9 @@ public class ContractController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(errorResponse("文件处理失败: " + e.getMessage()));
         } catch (Exception e) {
-            logger.error("批注失败", e);
+            logger.error("XML批注失败", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(errorResponse("批注失败: " + e.getMessage()));
+                    .body(errorResponse("XML批注失败: " + e.getMessage()));
         }
     }
 
@@ -339,10 +350,10 @@ public class ContractController {
         Map<String, Object> annotateEndpoint = new HashMap<>();
         annotateEndpoint.put("method", "POST");
         annotateEndpoint.put("path", "/api/annotate");
-        annotateEndpoint.put("description", "在合同中插入AI审查批注（POI方式）");
+        annotateEndpoint.put("description", "在合同中插入AI审查批注（XML方式，右侧批注，支持精确文字定位）");
         annotateEndpoint.put("parameters", Map.of(
             "file", "原始合同文件 (.docx)",
-            "review", "审查结果JSON字符串",
+            "review", "审查结果JSON字符串（支持 targetText、matchPattern 等精确定位字段）",
             "anchorStrategy", "锚点定位策略: preferAnchor|anchorOnly|textFallback (可选，默认: preferAnchor)",
             "cleanupAnchors", "是否清理锚点: true|false (可选，默认: false)"
         ));
