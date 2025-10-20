@@ -865,6 +865,7 @@ async function importChatGPTResult() {
     }
 
     // 验证ChatGPT响应格式
+    let parsedResponse = null;
     try {
         // 清理响应（移除markdown代码块）
         let cleanResponse = chatgptResponse.trim();
@@ -878,10 +879,18 @@ async function importChatGPTResult() {
             cleanResponse = cleanResponse.substring(0, cleanResponse.length - 3);
         }
 
-        const parsed = JSON.parse(cleanResponse.trim());
-        if (!parsed.issues) {
+        parsedResponse = JSON.parse(cleanResponse.trim());
+        if (!parsedResponse.issues) {
             throw new Error('ChatGPT响应缺少必需的issues字段');
         }
+
+        // 【新增】验证targetText字段
+        const preciseAnnotationStats = analyzePreciseAnnotationSupport(parsedResponse.issues);
+        if (preciseAnnotationStats.total > 0) {
+            const precisePercentage = ((preciseAnnotationStats.withTargetText / preciseAnnotationStats.total) * 100).toFixed(1);
+            console.info(`精确文字批注支持: ${preciseAnnotationStats.withTargetText}/${preciseAnnotationStats.total} 条问题 (${precisePercentage}%)`);
+        }
+
     } catch (e) {
         showToast('ChatGPT响应格式错误，请检查JSON格式', 'error');
         return;
@@ -915,7 +924,7 @@ async function importChatGPTResult() {
         const filename = chatgptFile.name.replace('.docx', '_ChatGPT审查.docx');
         downloadFile(blob, filename);
 
-        showChatGPTImportResult(filename);
+        showChatGPTImportResult(filename, parsedResponse.issues.length);
         showToast('ChatGPT审查结果导入成功! 文档已下载', 'success');
 
     } catch (error) {
@@ -926,8 +935,33 @@ async function importChatGPTResult() {
     }
 }
 
+/**
+ * 【新增】分析ChatGPT响应中的精确文字批注支持情况
+ * 用于统计有多少问题包含了targetText字段
+ */
+function analyzePreciseAnnotationSupport(issues) {
+    if (!issues || !Array.isArray(issues)) {
+        return { total: 0, withTargetText: 0, missingMatchPattern: 0 };
+    }
+
+    let total = issues.length;
+    let withTargetText = 0;
+    let missingMatchPattern = 0;
+
+    issues.forEach(issue => {
+        if (issue.targetText && issue.targetText.trim() !== '') {
+            withTargetText++;
+            if (!issue.matchPattern || issue.matchPattern.trim() === '') {
+                missingMatchPattern++;
+            }
+        }
+    });
+
+    return { total, withTargetText, missingMatchPattern };
+}
+
 // 显示ChatGPT导入结果
-function showChatGPTImportResult(filename) {
+function showChatGPTImportResult(filename, issuesCount) {
     const resultBox = document.getElementById('chatgpt-import-result');
     const summaryDiv = document.getElementById('chatgpt-import-summary');
 
@@ -935,8 +969,9 @@ function showChatGPTImportResult(filename) {
         <div class="import-summary">
             <p><strong>📄 文件名:</strong> ${filename}</p>
             <p><strong>✅ 状态:</strong> ChatGPT审查结果导入成功</p>
-            <p><strong>📊 流程:</strong> 文件解析 → ChatGPT审查 → 结果导入 → 批注生成</p>
-            <p><strong>💡 说明:</strong> 审查意见已添加到合同相应段落</p>
+            <p><strong>📊 问题数量:</strong> ${issuesCount || '?'} 条问题已批注</p>
+            <p><strong>📑 流程:</strong> 文件解析 → ChatGPT审查 → 结果导入 → 批注生成</p>
+            <p><strong>💡 说明:</strong> 审查意见已添加到合同相应位置（支持精确文字级别批注）</p>
         </div>
     `;
 
