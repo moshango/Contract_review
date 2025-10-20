@@ -58,7 +58,22 @@ public class XmlContractAnnotateService {
             logger.info("JSON解析成功, ReviewRequest对象: {}", reviewRequest);
 
             List<ReviewIssue> issues = reviewRequest.getIssues();
-            logger.info("获取到issues列表: {}, 数量: {}", issues, issues.size());
+            logger.info("获取到issues列表: 数量={}", issues != null ? issues.size() : 0);
+
+            // 【重要】检查每个issue是否包含anchorId
+            if (issues != null && !issues.isEmpty()) {
+                for (int i = 0; i < issues.size(); i++) {
+                    ReviewIssue issue = issues.get(i);
+                    logger.info("[Issue {}] clauseId={}, anchorId={}, targetText存在={}, 其他字段={severity={}, category={}, finding长度={}}",
+                               i + 1,
+                               issue.getClauseId(),
+                               issue.getAnchorId() != null ? "✓ " + issue.getAnchorId() : "✗ NULL",
+                               issue.getTargetText() != null,
+                               issue.getSeverity(),
+                               issue.getCategory(),
+                               issue.getFinding() != null ? issue.getFinding().length() : 0);
+                }
+            }
 
             // 2. 读取原始文档
             byte[] originalBytes = file.getBytes();
