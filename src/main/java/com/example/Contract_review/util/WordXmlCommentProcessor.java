@@ -328,86 +328,153 @@ public class WordXmlCommentProcessor {
 
     /**
      * 在document.xml中查找目标段落
+     * 支持三种策略进行多级回退定位
      */
     private Element findTargetParagraph(Document documentXml, ReviewIssue issue, String anchorStrategy) {
         Element documentElement = documentXml.getRootElement();
         Element body = documentElement.element(QName.get("body", W_NS));
-
         List<Element> paragraphs = body.elements(QName.get("p", W_NS));
+
+        logger.info("开始查找目标段落：clauseId={}, anchorId={}, 策略={}, 总段落数={}",
+                   issue.getClauseId(), issue.getAnchorId(), anchorStrategy, paragraphs.size());
 
         // 根据策略查找段落
         if ("anchorOnly".equalsIgnoreCase(anchorStrategy)) {
+            logger.debug("使用 anchorOnly 策略：仅通过anchorId查找");
             return findParagraphByAnchor(paragraphs, issue.getAnchorId());
+
         } else if ("textFallback".equalsIgnoreCase(anchorStrategy)) {
-            // 优先锚点，然后文本匹配
+            logger.debug("使用 textFallback 策略：优先anchorId，失败则用文本匹配");
             Element found = findParagraphByAnchor(paragraphs, issue.getAnchorId());
-            if (found != null) return found;
+            if (found != null) {
+                logger.info("✓ 锚点查找成功");
+                return found;
+            }
 
+            logger.info("  锚点查找失败，回退到文本匹配");
             return findParagraphByTextMatch(paragraphs, issue.getClauseId());
-        } else {
-            // 默认：preferAnchor - 优先锚点，然后条款ID文本匹配
-            Element found = findParagraphByAnchor(paragraphs, issue.getAnchorId());
-            if (found != null) return found;
 
+        } else {
+            // 默认：preferAnchor - 优先锚点，失败则条款ID文本匹配
+            logger.debug("使用 preferAnchor 策略（默认）：优先anchorId，失败则用文本匹配");
+            Element found = findParagraphByAnchor(paragraphs, issue.getAnchorId());
+            if (found != null) {
+                logger.info("✓ 锚点查找成功");
+                return found;
+            }
+
+            logger.info("  锚点查找失败，回退到文本匹配");
             return findParagraphByTextMatch(paragraphs, issue.getClauseId());
         }
     }
 
     /**
      * 通过锚点查找段落
+     *
+     * 按anchorId查找Word书签，定位到具体的条款段落
+     * 锚点格式：anc-c1-4f21 (前缀-条款号-哈希)
      */
     private Element findParagraphByAnchor(List<Element> paragraphs, String anchorId) {
-        if (anchorId == null) return null;
+        if (anchorId == null) {
+            logger.debug("anchorId为null，跳过锚点查找");
+            return null;
+        }
 
-        for (Element para : paragraphs) {
-            // 查找书签
+        logger.debug("开始按anchorId查找段落：anchorId={}, 总段落数={}", anchorId, paragraphs.size());
+
+        int foundBookmarks = 0;
+        for (int paraIndex = 0; paraIndex < paragraphs.size(); paraIndex++) {
+            Element para = paragraphs.get(paraIndex);
             List<Element> bookmarkStarts = para.elements(QName.get("bookmarkStart", W_NS));
+
+            if (!bookmarkStarts.isEmpty()) {
+                logger.debug("  [段落{}] 发现 {} 个书签", paraIndex, bookmarkStarts.size());
+            }
+
             for (Element bookmark : bookmarkStarts) {
                 String name = bookmark.attributeValue(QName.get("name", W_NS));
-                if (anchorId.equals(name)) {
-                    logger.debug("通过锚点找到目标段落：anchorId={}", anchorId);
-                    return para;
+                foundBookmarks++;
+
+                if (name != null) {
+                    logger.debug("    书签名称: {}", name);
+                    if (anchorId.equals(name)) {
+                        logger.info("✓ 通过锚点找到目标段落：anchorId={}, 段落索引={}", anchorId, paraIndex);
+                        return para;
+                    }
                 }
             }
         }
 
+        logger.warn("✗ 未找到anchorId对应的书签：anchorId={}, 文档中总书签数={}", anchorId, foundBookmarks);
         return null;
     }
 
     /**
      * 通过文本匹配查找段落
+     *
+     * 尝试通过clauseId的数字部分匹配段落标题
+     * 支持多种条款标题格式："第1条"、"一"、"1."、"1、"等
      */
     private Element findParagraphByTextMatch(List<Element> paragraphs, String clauseId) {
         if (clauseId == null) return null;
 
-        // 从clauseId提取数字（如 c1 -> 1）
+        // 从clauseId提取数字（如 c1 -> 1、c20 -> 20）
         String numStr = clauseId.replaceAll("[^0-9]", "");
-        if (numStr.isEmpty()) return null;
+        if (numStr.isEmpty()) {
+            logger.warn("无法从clauseId提取数字：clauseId={}", clauseId);
+            return null;
+        }
 
+        // 构建多种可能的条款标题格式
         String[] patterns = {
-            "第" + numStr + "条",
-            "第" + convertToChineseNumber(Integer.parseInt(numStr)) + "条",
-            numStr + ".",
-            numStr + "、"
+            "第" + numStr + "条",                    // 第1条
+            "第" + convertToChineseNumber(Integer.parseInt(numStr)) + "条",  // 第一条
+            numStr + ".",                           // 1.
+            numStr + "、",                          // 1、
+            numStr + "、 ",                         // 1、 (包含空格)
+            "（" + numStr + "）",                   // （1）
+            "(" + numStr + ")",                     // (1)
+            "· " + numStr,                          // · 1
+            numStr + " ",                           // 1 (后接空格)
+            "   " + numStr + "."                    // 3个空格+1. (某些文档格式)
         };
 
-        for (Element para : paragraphs) {
-            String paraText = extractParagraphText(para);
+        logger.debug("开始按文本匹配查找段落：clauseId={}, numStr={}, 匹配模式数={}",
+                   clauseId, numStr, patterns.length);
 
+        // 遍历所有段落
+        for (int paraIndex = 0; paraIndex < paragraphs.size(); paraIndex++) {
+            Element para = paragraphs.get(paraIndex);
+            String paraText = extractParagraphText(para).trim();
+
+            logger.debug("  [段落{}] 文本: {}", paraIndex, paraText.substring(0, Math.min(50, paraText.length())));
+
+            // 尝试所有匹配模式
             for (String pattern : patterns) {
                 if (paraText.contains(pattern)) {
-                    logger.debug("通过文本匹配找到目标段落：pattern={}, text={}", pattern, paraText);
+                    logger.info("✓ 通过文本匹配找到目标段落：clauseId={}, 模式={}, 段落文本={}, 段落索引={}",
+                              clauseId, pattern, paraText.substring(0, Math.min(50, paraText.length())), paraIndex);
                     return para;
                 }
             }
         }
 
-        // 如果没找到，返回第一个段落作为fallback
-        if (!paragraphs.isEmpty()) {
-            logger.debug("使用第一个段落作为fallback");
-            return paragraphs.get(0);
+        // 如果仍未找到，尝试使用更宽松的匹配
+        logger.warn("严格模式文本匹配失败，尝试宽松模式：clauseId={}, numStr={}", clauseId, numStr);
+
+        for (int paraIndex = 0; paraIndex < paragraphs.size(); paraIndex++) {
+            Element para = paragraphs.get(paraIndex);
+            String paraText = extractParagraphText(para);
+
+            // 宽松模式：只要段落开头包含数字就匹配
+            if (paraText.startsWith(numStr)) {
+                logger.info("✓ 通过宽松模式文本匹配找到目标段落：clauseId={}, numStr={}, 段落索引={}",
+                          clauseId, numStr, paraIndex);
+                return para;
+            }
         }
 
+        logger.warn("✗ 无法通过文本匹配找到段落：clauseId={}, numStr={}", clauseId, numStr);
         return null;
     }
 
