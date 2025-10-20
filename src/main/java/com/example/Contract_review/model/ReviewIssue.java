@@ -47,4 +47,28 @@ public class ReviewIssue {
      * 修改建议
      */
     private String suggestion;
+
+    /**
+     * 要批注的具体文字（精确匹配）
+     * 如果不提供，则使用整段批注（后向兼容）
+     * 例如：发现的问题是针对某句话的具体文字
+     */
+    private String targetText;
+
+    /**
+     * 文字匹配模式
+     * EXACT: 精确匹配（默认）
+     * CONTAINS: 包含匹配
+     * REGEX: 正则表达式匹配
+     */
+    @Builder.Default
+    private String matchPattern = "EXACT";
+
+    /**
+     * 如果有多个匹配结果，选择第几个（1-based index，默认：1）
+     * 例如：该文字在段落中出现了3次，选择第2次
+     */
+    @Builder.Default
+    private Integer matchIndex = 1;
 }
+

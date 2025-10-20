@@ -44,6 +44,13 @@ public class WordXmlCommentProcessor {
     // 批注ID计数器
     private final AtomicInteger commentIdCounter = new AtomicInteger(1);
 
+    // 精确文字匹配定位器
+    private final PreciseTextAnnotationLocator preciseLocator;
+
+    public WordXmlCommentProcessor(PreciseTextAnnotationLocator preciseLocator) {
+        this.preciseLocator = preciseLocator;
+    }
+
     /**
      * 为Word文档添加批注（纯XML操作）
      *
@@ -152,6 +159,7 @@ public class WordXmlCommentProcessor {
 
     /**
      * 为单个问题添加批注
+     * 支持精确文字匹配和段落级别批注两种模式
      */
     private boolean addCommentForIssue(Document documentXml, Document commentsXml,
                                       ReviewIssue issue, String anchorStrategy) {
@@ -167,13 +175,49 @@ public class WordXmlCommentProcessor {
             // 2. 生成批注ID
             int commentId = commentIdCounter.getAndIncrement();
 
-            // 3. 在document.xml中插入批注标记
-            insertCommentRangeInDocument(targetParagraph, commentId);
+            // 3. 根据是否提供targetText，选择插入方式
+            Element startRun = null;
+            Element endRun = null;
 
-            // 4. 在comments.xml中添加批注内容
+            if (issue.getTargetText() != null && !issue.getTargetText().isEmpty()) {
+                // 精确文字匹配模式
+                TextMatchResult matchResult = preciseLocator.findTextInParagraph(
+                        targetParagraph,
+                        issue.getTargetText(),
+                        issue.getMatchPattern() != null ? issue.getMatchPattern() : "EXACT",
+                        issue.getMatchIndex() != null ? issue.getMatchIndex() : 1
+                );
+
+                if (matchResult != null) {
+                    startRun = matchResult.getStartRun();
+                    endRun = matchResult.getEndRun();
+                    logger.debug("使用精确文字匹配插入批注：文字={}, 起始Run={}, 结束Run={}",
+                               issue.getTargetText(),
+                               startRun != null ? "✓" : "null",
+                               endRun != null ? "✓" : "null");
+                } else {
+                    logger.warn("精确文字匹配失败，降级到段落级别批注：targetText={}",
+                               issue.getTargetText());
+                    startRun = null;
+                    endRun = null;
+                }
+            }
+
+            // 4. 插入批注标记
+            if (startRun != null && endRun != null) {
+                // 精确位置批注
+                insertPreciseCommentRange(targetParagraph, startRun, endRun, commentId);
+            } else {
+                // 段落级别批注（默认或降级）
+                insertCommentRangeInDocument(targetParagraph, commentId);
+            }
+
+            // 5. 在comments.xml中添加批注内容
             addCommentToCommentsXml(commentsXml, commentId, issue);
 
-            logger.debug("成功添加批注：commentId={}, clauseId={}", commentId, issue.getClauseId());
+            logger.debug("成功添加批注：commentId={}, clauseId={}, 方式={}",
+                        commentId, issue.getClauseId(),
+                        (startRun != null ? "精确" : "段落"));
             return true;
 
         } catch (Exception e) {
@@ -309,7 +353,7 @@ public class WordXmlCommentProcessor {
     }
 
     /**
-     * 在document.xml中插入批注范围标记
+     * 在document.xml中插入批注范围标记（段落级别）
      */
     private void insertCommentRangeInDocument(Element paragraph, int commentId) {
         // 在段落开始插入批注范围起始标记
@@ -325,7 +369,60 @@ public class WordXmlCommentProcessor {
         Element commentReference = run.addElement(QName.get("commentReference", W_NS));
         commentReference.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
 
-        logger.debug("在段落中插入批注标记：commentId={}", commentId);
+        logger.debug("在段落中插入批注标记（段落级别）：commentId={}", commentId);
+    }
+
+    /**
+     * 在具体的Run元素处插入批注范围标记（精确文字级别）
+     *
+     * @param paragraph 目标段落
+     * @param startRun 起始Run元素
+     * @param endRun 结束Run元素
+     * @param commentId 批注ID
+     */
+    private void insertPreciseCommentRange(Element paragraph, Element startRun,
+                                          Element endRun, int commentId) {
+        try {
+            // 获取所有Run元素以确定插入位置
+            List<Element> allRuns = paragraph.elements(QName.get("r", W_NS));
+            int startRunIndex = allRuns.indexOf(startRun);
+            int endRunIndex = allRuns.indexOf(endRun);
+
+            if (startRunIndex < 0 || endRunIndex < 0) {
+                logger.warn("无法找到Run元素索引，降级到段落级别：startIdx={}, endIdx={}",
+                           startRunIndex, endRunIndex);
+                insertCommentRangeInDocument(paragraph, commentId);
+                return;
+            }
+
+            // 在起始Run之前插入commentRangeStart
+            Element commentRangeStart = new org.dom4j.tree.DefaultElement(QName.get("commentRangeStart", W_NS));
+            commentRangeStart.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
+
+            // 使用dom4j的addElement会在末尾添加，需要手动调整位置
+            paragraph.elements().add(startRunIndex, commentRangeStart);
+
+            // 重新获取Run列表（因为已添加了commentRangeStart）
+            allRuns = paragraph.elements(QName.get("r", W_NS));
+            endRunIndex = allRuns.indexOf(endRun);
+
+            // 在结束Run之后插入commentRangeEnd
+            Element commentRangeEnd = new org.dom4j.tree.DefaultElement(QName.get("commentRangeEnd", W_NS));
+            commentRangeEnd.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
+            paragraph.elements().add(endRunIndex + 2, commentRangeEnd);
+
+            // 添加批注引用
+            Element run = paragraph.addElement(QName.get("r", W_NS));
+            Element commentReference = run.addElement(QName.get("commentReference", W_NS));
+            commentReference.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
+
+            logger.debug("在精确位置插入批注标记：commentId={}, startRunIdx={}, endRunIdx={}",
+                       commentId, startRunIndex, endRunIndex);
+
+        } catch (Exception e) {
+            logger.error("精确位置批注插入失败，降级到段落级别", e);
+            insertCommentRangeInDocument(paragraph, commentId);
+        }
     }
 
     /**

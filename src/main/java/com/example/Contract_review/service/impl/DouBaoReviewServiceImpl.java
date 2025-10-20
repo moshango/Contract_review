@@ -1,6 +1,7 @@
 package com.example.Contract_review.service.impl;
 
 import com.example.Contract_review.model.Clause;
+import com.example.Contract_review.model.ParseResult;
 import com.example.Contract_review.service.AIReviewService;
 import com.example.Contract_review.util.VolcEngineSignature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,18 +42,18 @@ public class DouBaoReviewServiceImpl implements AIReviewService {
     }
 
     @Override
-    public String reviewContract(List<Clause> clauses, String standards) {
-        logger.info("开始豆包AI合同审查，条款数量: {}", clauses.size());
+    public String reviewContract(ParseResult parseResult, String contractType) throws Exception {
+        logger.info("开始豆包AI合同审查，条款数量: {}", parseResult.getClauses().size());
 
         try {
             // 构建请求消息
-            String prompt = buildReviewPrompt(clauses, standards);
+            String prompt = buildReviewPrompt(parseResult.getClauses(), contractType);
             Map<String, Object> requestBody = buildRequestBody(prompt);
 
             // 设置请求头
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerToken(apiKey);
+            headers.set("Authorization", "Bearer " + apiKey);
 
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
 
@@ -200,7 +201,7 @@ public class DouBaoReviewServiceImpl implements AIReviewService {
     }
 
     @Override
-    public String getServiceName() {
-        return "DouBao AI Review Service";
+    public String getProviderName() {
+        return "doubao";
     }
 }
