@@ -39,6 +39,13 @@ public class TextMatchResult {
      */
     private int endPosition;
 
+    /**
+     * 是否在单个Run内（用于判断是否需要分割Run）
+     * true: 匹配文字在单个Run内，可以进行Run分割
+     * false: 匹配文字跨越多个Run，需要降级处理
+     */
+    private boolean isSingleRun;
+
     // Getters and Setters
 
     public Element getStartRun() {
@@ -89,6 +96,14 @@ public class TextMatchResult {
         this.endPosition = endPosition;
     }
 
+    public boolean isSingleRun() {
+        return isSingleRun;
+    }
+
+    public void setIsSingleRun(boolean singleRun) {
+        isSingleRun = singleRun;
+    }
+
     @Override
     public String toString() {
         return "TextMatchResult{" +
@@ -98,6 +113,7 @@ public class TextMatchResult {
                 ", endOffsetInRun=" + endOffsetInRun +
                 ", startPosition=" + startPosition +
                 ", endPosition=" + endPosition +
+                ", isSingleRun=" + isSingleRun +
                 '}';
     }
 }

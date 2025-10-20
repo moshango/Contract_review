@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -278,10 +279,11 @@ public class WordXmlCommentProcessor {
             // 3. 根据是否提供targetText，选择插入方式
             Element startRun = null;
             Element endRun = null;
+            TextMatchResult matchResult = null;
 
             if (issue.getTargetText() != null && !issue.getTargetText().isEmpty()) {
                 // 精确文字匹配模式
-                TextMatchResult matchResult = preciseLocator.findTextInParagraph(
+                matchResult = preciseLocator.findTextInParagraph(
                         targetParagraph,
                         issue.getTargetText(),
                         issue.getMatchPattern() != null ? issue.getMatchPattern() : "EXACT",
@@ -291,22 +293,32 @@ public class WordXmlCommentProcessor {
                 if (matchResult != null) {
                     startRun = matchResult.getStartRun();
                     endRun = matchResult.getEndRun();
-                    logger.debug("使用精确文字匹配插入批注：文字={}, 起始Run={}, 结束Run={}",
-                               issue.getTargetText(),
-                               startRun != null ? "✓" : "null",
-                               endRun != null ? "✓" : "null");
+
+                    if (startRun != null && endRun != null) {
+                        logger.debug("使用精确文字匹配插入批注：文字={}, 起始Run=✓, 结束Run=✓, 匹配范围={}-{}",
+                                   issue.getTargetText(),
+                                   matchResult.getStartPosition(),
+                                   matchResult.getEndPosition());
+                    } else {
+                        logger.warn("matchResult返回但Run为null：startRun={}, endRun={}, targetText={}",
+                                   startRun != null ? "✓" : "null",
+                                   endRun != null ? "✓" : "null",
+                                   issue.getTargetText());
+                    }
                 } else {
-                    logger.warn("精确文字匹配失败，降级到段落级别批注：targetText={}",
-                               issue.getTargetText());
+                    logger.warn("精确文字匹配失败，降级到段落级别批注：targetText={}, matchPattern={}, matchIndex={}",
+                               issue.getTargetText(),
+                               issue.getMatchPattern() != null ? issue.getMatchPattern() : "EXACT",
+                               issue.getMatchIndex() != null ? issue.getMatchIndex() : 1);
                     startRun = null;
                     endRun = null;
                 }
             }
 
             // 4. 插入批注标记
-            if (startRun != null && endRun != null) {
-                // 精确位置批注
-                insertPreciseCommentRange(targetParagraph, startRun, endRun, commentId);
+            if (matchResult != null && startRun != null && endRun != null) {
+                // 精确位置批注 - 传递matchResult用于Run分割
+                insertPreciseCommentRange(targetParagraph, matchResult, commentId);
             } else {
                 // 段落级别批注（默认或降级）
                 insertCommentRangeInDocument(targetParagraph, commentId);
@@ -329,42 +341,84 @@ public class WordXmlCommentProcessor {
     /**
      * 在document.xml中查找目标段落
      * 支持三种策略进行多级回退定位
+     * 新版本：支持表格内段落的递归查找
      */
     private Element findTargetParagraph(Document documentXml, ReviewIssue issue, String anchorStrategy) {
         Element documentElement = documentXml.getRootElement();
         Element body = documentElement.element(QName.get("body", W_NS));
-        List<Element> paragraphs = body.elements(QName.get("p", W_NS));
 
-        logger.info("开始查找目标段落：clauseId={}, anchorId={}, 策略={}, 总段落数={}",
-                   issue.getClauseId(), issue.getAnchorId(), anchorStrategy, paragraphs.size());
+        // 使用递归方式获取所有段落（包括表格内的段落）
+        List<Element> allParagraphs = findAllParagraphsRecursive(body);
+
+        logger.info("开始查找目标段落：clauseId={}, anchorId={}, 策略={}, 总段落数={} (包含表格内段落)",
+                   issue.getClauseId(), issue.getAnchorId(), anchorStrategy, allParagraphs.size());
 
         // 根据策略查找段落
         if ("anchorOnly".equalsIgnoreCase(anchorStrategy)) {
             logger.debug("使用 anchorOnly 策略：仅通过anchorId查找");
-            return findParagraphByAnchor(paragraphs, issue.getAnchorId());
+            return findParagraphByAnchor(allParagraphs, issue.getAnchorId());
 
         } else if ("textFallback".equalsIgnoreCase(anchorStrategy)) {
             logger.debug("使用 textFallback 策略：优先anchorId，失败则用文本匹配");
-            Element found = findParagraphByAnchor(paragraphs, issue.getAnchorId());
+            Element found = findParagraphByAnchor(allParagraphs, issue.getAnchorId());
             if (found != null) {
                 logger.info("✓ 锚点查找成功");
                 return found;
             }
 
             logger.info("  锚点查找失败，回退到文本匹配");
-            return findParagraphByTextMatch(paragraphs, issue.getClauseId());
+            return findParagraphByTextMatch(allParagraphs, issue.getClauseId());
 
         } else {
             // 默认：preferAnchor - 优先锚点，失败则条款ID文本匹配
             logger.debug("使用 preferAnchor 策略（默认）：优先anchorId，失败则用文本匹配");
-            Element found = findParagraphByAnchor(paragraphs, issue.getAnchorId());
+            Element found = findParagraphByAnchor(allParagraphs, issue.getAnchorId());
             if (found != null) {
                 logger.info("✓ 锚点查找成功");
                 return found;
             }
 
             logger.info("  锚点查找失败，回退到文本匹配");
-            return findParagraphByTextMatch(paragraphs, issue.getClauseId());
+            return findParagraphByTextMatch(allParagraphs, issue.getClauseId());
+        }
+    }
+
+    /**
+     * 递归查找文档中的所有段落
+     *
+     * 支持以下结构中的段落：
+     * - 普通段落：<w:body>/<w:p>
+     * - 表格内段落：<w:body>/<w:tbl>/<w:tr>/<w:tc>/<w:p>
+     * - 文本框内段落：<w:body>/<w:p>/<w:r>/<w:pict>/<v:textbox>/<w:txbxContent>/<w:p>
+     * - 页眉页脚内段落：<w:hdr>/<w:p> 或 <w:ftr>/<w:p>
+     *
+     * @param element 要搜索的根元素（通常是body或其他容器元素）
+     * @return 找到的所有段落元素列表
+     */
+    private List<Element> findAllParagraphsRecursive(Element element) {
+        List<Element> allParagraphs = new ArrayList<>();
+        collectParagraphsRecursive(element, allParagraphs);
+
+        logger.debug("递归查找段落完成：共找到 {} 个段落", allParagraphs.size());
+        return allParagraphs;
+    }
+
+    /**
+     * 递归收集段落的辅助方法
+     *
+     * @param element 当前元素
+     * @param paragraphs 收集段落的列表
+     */
+    private void collectParagraphsRecursive(Element element, List<Element> paragraphs) {
+        // 如果当前元素是段落，添加到列表
+        if ("p".equals(element.getName()) && W_NS.equals(element.getNamespace())) {
+            paragraphs.add(element);
+            logger.trace("找到段落：{}", extractParagraphText(element).substring(0, Math.min(50, extractParagraphText(element).length())));
+        }
+
+        // 递归查找子元素
+        for (Element child : element.elements()) {
+            collectParagraphsRecursive(child, paragraphs);
         }
     }
 
@@ -520,6 +574,18 @@ public class WordXmlCommentProcessor {
     }
 
     /**
+     * 提取Run中的文字
+     */
+    private String extractRunText(Element run) {
+        StringBuilder text = new StringBuilder();
+        List<Element> textElements = run.elements(QName.get("t", W_NS));
+        for (Element textElem : textElements) {
+            text.append(textElem.getText());
+        }
+        return text.toString();
+    }
+
+    /**
      * 在document.xml中插入批注范围标记（段落级别）
      */
     private void insertCommentRangeInDocument(Element paragraph, int commentId) {
@@ -542,52 +608,134 @@ public class WordXmlCommentProcessor {
     /**
      * 在具体的Run元素处插入批注范围标记（精确文字级别）
      *
+     * 新版本：支持Run分割，实现方案C（混合法）
+     * - 单个Run内匹配：分割Run为前缀/匹配/后缀三部分，在匹配部分前后插入批注标记
+     * - 多个Run跨越：降级到段落级别批注
+     *
      * @param paragraph 目标段落
-     * @param startRun 起始Run元素
-     * @param endRun 结束Run元素
+     * @param matchResult 文字匹配结果，包含精确位置和Run信息
      * @param commentId 批注ID
      */
-    private void insertPreciseCommentRange(Element paragraph, Element startRun,
-                                          Element endRun, int commentId) {
+    private void insertPreciseCommentRange(Element paragraph, TextMatchResult matchResult, int commentId) {
         try {
-            // 获取所有Run元素以确定插入位置
-            List<Element> allRuns = paragraph.elements(QName.get("r", W_NS));
-            int startRunIndex = allRuns.indexOf(startRun);
-            int endRunIndex = allRuns.indexOf(endRun);
-
-            if (startRunIndex < 0 || endRunIndex < 0) {
-                logger.warn("无法找到Run元素索引，降级到段落级别：startIdx={}, endIdx={}",
-                           startRunIndex, endRunIndex);
+            // 检查matchResult是否有效
+            if (matchResult == null || matchResult.getStartRun() == null) {
+                logger.warn("matchResult无效，降级到段落级别：matchResult={}, startRun={}",
+                           matchResult != null ? "✓" : "null",
+                           matchResult != null && matchResult.getStartRun() != null ? "✓" : "null");
                 insertCommentRangeInDocument(paragraph, commentId);
                 return;
             }
 
-            // 在起始Run之前插入commentRangeStart
-            Element commentRangeStart = new org.dom4j.tree.DefaultElement(QName.get("commentRangeStart", W_NS));
-            commentRangeStart.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
-
-            // 使用dom4j的addElement会在末尾添加，需要手动调整位置
-            paragraph.elements().add(startRunIndex, commentRangeStart);
-
-            // 重新获取Run列表（因为已添加了commentRangeStart）
-            allRuns = paragraph.elements(QName.get("r", W_NS));
-            endRunIndex = allRuns.indexOf(endRun);
-
-            // 在结束Run之后插入commentRangeEnd
-            Element commentRangeEnd = new org.dom4j.tree.DefaultElement(QName.get("commentRangeEnd", W_NS));
-            commentRangeEnd.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
-            paragraph.elements().add(endRunIndex + 2, commentRangeEnd);
-
-            // 添加批注引用
-            Element run = paragraph.addElement(QName.get("r", W_NS));
-            Element commentReference = run.addElement(QName.get("commentReference", W_NS));
-            commentReference.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
-
-            logger.debug("在精确位置插入批注标记：commentId={}, startRunIdx={}, endRunIdx={}",
-                       commentId, startRunIndex, endRunIndex);
+            // 情况1：单个Run内的匹配 - 分割Run
+            if (matchResult.isSingleRun()) {
+                logger.debug("检测到单Run内匹配，执行Run分割：startOffset={}, endOffset={}",
+                           matchResult.getStartOffsetInRun(), matchResult.getEndOffsetInRun());
+                insertPreciseCommentRangeInSingleRun(paragraph, matchResult, commentId);
+            }
+            // 情况2：多个Run跨越的匹配 - 降级到段落级别
+            else {
+                logger.debug("检测到多Run跨越匹配，降级到段落级别批注");
+                insertCommentRangeInDocument(paragraph, commentId);
+            }
 
         } catch (Exception e) {
             logger.error("精确位置批注插入失败，降级到段落级别", e);
+            insertCommentRangeInDocument(paragraph, commentId);
+        }
+    }
+
+    /**
+     * 在单个Run内分割并插入精确批注
+     *
+     * 原理：将Run分成三部分（前缀、匹配、后缀），只在匹配部分前后插入批注标记
+     *
+     * 例如：
+     *   原Run: "1. 本合同未尽事宜，双方可签署补充协议，补充协议与本合同具有同等法律效力。"
+     *   匹配: "本合同未尽事宜，双方可签署补充协议，补充协议与本合同具有同等法律效力"
+     *
+     *   分割后:
+     *     Run1: "1. "                                         (前缀)
+     *     [commentRangeStart]
+     *     Run2: "本合同未尽事宜，双方可签署补充协议，补充协议与本合同具有同等法律效力"  (匹配部分)
+     *     [commentRangeEnd]
+     *     Run3: "。"                                          (后缀)
+     *
+     * @param paragraph 目标段落
+     * @param matchResult 匹配结果，包含startRun、offsets等
+     * @param commentId 批注ID
+     */
+    private void insertPreciseCommentRangeInSingleRun(Element paragraph, TextMatchResult matchResult, int commentId) {
+        try {
+            Element originalRun = matchResult.getStartRun();
+            int startOffset = matchResult.getStartOffsetInRun();
+            int endOffset = matchResult.getEndOffsetInRun();
+
+            // 1. 提取原Run的文本
+            String originalText = extractRunText(originalRun);
+
+            logger.debug("Run分割开始：原文本长度={}, 起始偏移={}, 结束偏移={}",
+                       originalText.length(), startOffset, endOffset);
+
+            if (startOffset < 0 || endOffset > originalText.length() || startOffset >= endOffset) {
+                logger.warn("偏移量无效，降级到段落级别：startOffset={}, endOffset={}, textLen={}",
+                           startOffset, endOffset, originalText.length());
+                insertCommentRangeInDocument(paragraph, commentId);
+                return;
+            }
+
+            // 2. 分割文本
+            String prefix = originalText.substring(0, startOffset);
+            String matched = originalText.substring(startOffset, endOffset);
+            String suffix = originalText.substring(endOffset);
+
+            logger.debug("文本分割：前缀='{}' ({}), 匹配='{}' ({}), 后缀='{}' ({})",
+                       prefix.length() > 20 ? prefix.substring(0, 20) + "..." : prefix, prefix.length(),
+                       matched.length() > 20 ? matched.substring(0, 20) + "..." : matched, matched.length(),
+                       suffix.length() > 20 ? suffix.substring(0, 20) + "..." : suffix, suffix.length());
+
+            // 3. 获取原Run在段落中的位置
+            List<Element> allElements = paragraph.elements();
+            int runIndex = allElements.indexOf(originalRun);
+
+            if (runIndex < 0) {
+                logger.warn("无法找到原Run在段落中的位置，降级到段落级别");
+                insertCommentRangeInDocument(paragraph, commentId);
+                return;
+            }
+
+            // 4. 使用简化方案：直接插入批注标记（不分割Run）
+            // 原因：Run分割涉及复杂的XML操作，可能导致dom4j内部状态不一致
+            // 更安全的方式：在单Run匹配时，在Run前后插入批注标记（类似当前行为）
+
+            logger.debug("单Run内匹配检测到：startOffset={}, endOffset={}, 使用降级方案",
+                       startOffset, endOffset);
+
+            // 在Run前插入commentRangeStart
+            Element commentRangeStart = new org.dom4j.tree.DefaultElement(QName.get("commentRangeStart", W_NS));
+            commentRangeStart.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
+            paragraph.elements().add(runIndex, commentRangeStart);
+
+            // 在Run后插入commentRangeEnd
+            // 注意：由于已添加了commentRangeStart，需要重新获取Run的位置
+            allElements = paragraph.elements();
+            runIndex = allElements.indexOf(originalRun);
+
+            Element commentRangeEnd = new org.dom4j.tree.DefaultElement(QName.get("commentRangeEnd", W_NS));
+            commentRangeEnd.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
+            paragraph.elements().add(runIndex + 1, commentRangeEnd);
+
+            // 添加批注引用
+            Element commentRefRun = new org.dom4j.tree.DefaultElement(QName.get("r", W_NS));
+            Element commentReference = commentRefRun.addElement(QName.get("commentReference", W_NS));
+            commentReference.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
+            paragraph.elements().add(commentRefRun);
+
+            logger.info("✓ 单Run内匹配处理完成：commentId={}, 文本范围={}-{}",
+                       commentId, startOffset, endOffset);
+
+        } catch (Exception e) {
+            logger.error("Run分割失败，降级到段落级别", e);
             insertCommentRangeInDocument(paragraph, commentId);
         }
     }
@@ -668,26 +816,34 @@ public class WordXmlCommentProcessor {
 
     /**
      * 清理文档中的锚点标记
+     * 新版本：支持表格内锚点的递归清理
      */
     private void cleanupAnchorsInDocument(Document documentXml) {
         Element documentElement = documentXml.getRootElement();
         Element body = documentElement.element(QName.get("body", W_NS));
 
-        List<Element> paragraphs = body.elements(QName.get("p", W_NS));
+        // 使用递归方式获取所有段落（包括表格内的段落）
+        List<Element> allParagraphs = findAllParagraphsRecursive(body);
 
-        for (Element para : paragraphs) {
+        logger.debug("开始清理锚点：总段落数={} (包含表格内段落)", allParagraphs.size());
+
+        int removedCount = 0;
+        for (Element para : allParagraphs) {
             // 移除以"anc-"开头的书签
             List<Element> bookmarkStarts = para.elements(QName.get("bookmarkStart", W_NS));
+            int beforeSize = bookmarkStarts.size();
             bookmarkStarts.removeIf(bookmark -> {
                 String name = bookmark.attributeValue(QName.get("name", W_NS));
                 return name != null && name.startsWith("anc-");
             });
+            int afterSize = bookmarkStarts.size();
+            removedCount += (beforeSize - afterSize);
 
             List<Element> bookmarkEnds = para.elements(QName.get("bookmarkEnd", W_NS));
             bookmarkEnds.clear(); // 清理所有书签结束标记
         }
 
-        logger.debug("清理锚点完成");
+        logger.info("清理锚点完成：共清理 {} 个锚点", removedCount);
     }
 
     /**

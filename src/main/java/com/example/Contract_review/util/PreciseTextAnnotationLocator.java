@@ -174,21 +174,25 @@ public class PreciseTextAnnotationLocator {
         result.setEndPosition(endPos);
 
         // 查找起始Run
-        for (RunInfo info : runInfos) {
+        for (int i = 0; i < runInfos.size(); i++) {
+            RunInfo info = runInfos.get(i);
             if (startPos >= info.startPos && startPos < info.endPos) {
                 result.setStartRun(info.run);
                 result.setStartOffsetInRun(startPos - info.startPos);
-                logger.debug("起始Run: 全局位置={}, Run内偏移={}", startPos, result.getStartOffsetInRun());
+                logger.debug("起始Run: 全局位置={}, Run索引={}, Run内偏移={}, 文本='{}'",
+                           startPos, i, result.getStartOffsetInRun(), info.text);
                 break;
             }
         }
 
         // 查找结束Run
-        for (RunInfo info : runInfos) {
+        for (int i = 0; i < runInfos.size(); i++) {
+            RunInfo info = runInfos.get(i);
             if (endPos > info.startPos && endPos <= info.endPos) {
                 result.setEndRun(info.run);
                 result.setEndOffsetInRun(endPos - info.startPos);
-                logger.debug("结束Run: 全局位置={}, Run内偏移={}", endPos, result.getEndOffsetInRun());
+                logger.debug("结束Run: 全局位置={}, Run索引={}, Run内偏移={}, 文本='{}'",
+                           endPos, i, result.getEndOffsetInRun(), info.text);
                 break;
             }
         }
@@ -199,7 +203,33 @@ public class PreciseTextAnnotationLocator {
             if (endPos == lastInfo.endPos) {
                 result.setEndRun(lastInfo.run);
                 result.setEndOffsetInRun(lastInfo.text.length());
-                logger.debug("结束位置在最后一个Run: 偏移={}", result.getEndOffsetInRun());
+                logger.debug("结束位置在最后一个Run: 位置={}, Run索引={}, 偏移={}, 文本='{}'",
+                           endPos, runInfos.size() - 1, result.getEndOffsetInRun(), lastInfo.text);
+            }
+        }
+
+        // 检查是否在单个Run内
+        if (result.getStartRun() != null && result.getEndRun() != null) {
+            if (result.getStartRun() == result.getEndRun()) {
+                result.setIsSingleRun(true);
+                logger.debug("匹配在单个Run内：Run索引已确定，可以进行Run分割");
+            } else {
+                result.setIsSingleRun(false);
+                logger.debug("匹配跨越多个Run：需要降级处理");
+            }
+        }
+
+        // 检查映射结果
+        if (result.getStartRun() == null || result.getEndRun() == null) {
+            logger.warn("Run映射失败: startRun={}, endRun={}, 匹配范围={}-{}, RunInfo总数={}",
+                       result.getStartRun() != null ? "✓" : "✗",
+                       result.getEndRun() != null ? "✓" : "✗",
+                       startPos, endPos, runInfos.size());
+
+            // 详细输出所有Run的位置范围
+            for (int i = 0; i < runInfos.size(); i++) {
+                RunInfo info = runInfos.get(i);
+                logger.debug("  Run[{}]: 位置范围=[{}-{}), 文本='{}'", i, info.startPos, info.endPos, info.text);
             }
         }
 

@@ -1,0 +1,26 @@
+{
+  "issues": [
+    {
+      "clauseId": "c1",
+      "anchorId": "anc-c1-test",
+      "severity": "HIGH",
+      "category": "技术指标",
+      "finding": "识别准确率要求不够明确",
+      "suggestion": "建议将"识别准确率≥90%"修改为"识别准确率≥95%，且在测试数据集上的表现需要经过第三方验证"",
+      "targetText": "识别准确率≥90%",
+      "matchPattern": "EXACT",
+      "matchIndex": 1
+    },
+    {
+      "clauseId": "c2",
+      "anchorId": "anc-c2-test",
+      "severity": "MEDIUM",
+      "category": "表格数据",
+      "finding": "表格中的数据需要更详细的说明",
+      "suggestion": "建议在表格中增加数据来源和验证方法的说明",
+      "targetText": "数据准确性",
+      "matchPattern": "CONTAINS",
+      "matchIndex": 1
+    }
+  ]
+}
