@@ -242,6 +242,19 @@
                     <p>与 https://chatgpt.com/ 配合使用，实现合同智能审查</p>
                 </div>
 
+                <!-- 【调试面板】显示当前状态 -->
+                <div id="chatgpt-debug-panel" style="background-color: #f0f0f0; border: 1px solid #ccc; border-radius: 5px; padding: 10px; margin-bottom: 15px;">
+                    <h4>🔧 调试信息（开发者使用）</h4>
+                    <p><strong>当前parseResultId:</strong> <span id="debug-parseResultId" style="color: #ff6b6b; font-weight: bold;">未设置</span></p>
+                    <p><strong>状态:</strong> <span id="debug-status" style="color: #666;">等待步骤1...</span></p>
+                    <button class="btn btn-secondary" onclick="debugShowParseResultId()" style="font-size: 12px; padding: 5px 10px;">
+                        🔍 查看全部信息
+                    </button>
+                    <button class="btn btn-secondary" onclick="clearChatGPTDebug()" style="font-size: 12px; padding: 5px 10px;">
+                        🗑️ 清除缓存
+                    </button>
+                </div>
+
                 <!-- 步骤说明 -->
                 <div class="chatgpt-workflow">
                     <div class="workflow-steps">

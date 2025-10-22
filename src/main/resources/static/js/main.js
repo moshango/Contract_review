@@ -771,15 +771,75 @@ function resetAutoReviewForm() {
 
 let chatgptFile = null;
 let chatgptPrompt = null;
+let chatgptParseResultId = null;  // 【关键修复】存储parseResultId用于后续批注
+
+// 【调试函数】更新调试面板
+function updateChatGPTDebugPanel() {
+    const debugSpan = document.getElementById('debug-parseResultId');
+    const statusSpan = document.getElementById('debug-status');
+
+    if (chatgptParseResultId) {
+        debugSpan.textContent = chatgptParseResultId;
+        debugSpan.style.color = '#28a745';
+        statusSpan.textContent = '✅ parseResultId 已保存，可以进行步骤2';
+        statusSpan.style.color = '#28a745';
+    } else {
+        debugSpan.textContent = '未设置';
+        debugSpan.style.color = '#ff6b6b';
+        statusSpan.textContent = '❌ parseResultId 未设置，请先执行步骤1';
+        statusSpan.style.color = '#ff6b6b';
+    }
+}
+
+// 【调试函数】显示全部调试信息
+function debugShowParseResultId() {
+    const info = `
+=== ChatGPT 集成调试信息 ===
+parseResultId: ${chatgptParseResultId || '未设置'}
+chatgptFile: ${chatgptFile ? chatgptFile.name : '未选择'}
+chatgptPrompt: ${chatgptPrompt ? '已保存 (' + chatgptPrompt.length + ' 字符)' : '未生成'}
+当前时间: ${new Date().toLocaleString('zh-CN')}
+
+【关键检查】
+1. 如果 parseResultId 为"未设置"，说明步骤1 还未执行或执行失败
+2. 如果 parseResultId 有值，说明已正确保存
+3. 如果为空，检查浏览器控制台是否有错误信息
+
+【网络检查】
+打开浏览器 F12 → Network 标签
+- 找到 /chatgpt/generate-prompt 请求
+- 检查响应 JSON 中是否包含 "parseResultId" 字段
+    `;
+
+    console.log(info);
+    alert('调试信息已输出到控制台 (F12 → Console)，以下是摘要：\n\n' +
+          'parseResultId: ' + (chatgptParseResultId || '未设置') + '\n' +
+          'chatgptFile: ' + (chatgptFile ? chatgptFile.name : '未选择') + '\n\n' +
+          '请检查浏览器控制台获取更多信息');
+}
+
+// 【调试函数】清除缓存和状态
+function clearChatGPTDebug() {
+    chatgptFile = null;
+    chatgptPrompt = null;
+    chatgptParseResultId = null;
+    console.log('✅ 已清除所有缓存');
+    updateChatGPTDebugPanel();
+    showToast('已清除缓存，请重新开始', 'info');
+}
 
 // 处理ChatGPT文件选择
 function handleChatGPTFileSelect(input) {
     const file = input.files[0];
     if (file) {
         chatgptFile = file;
+        chatgptParseResultId = null;  // 重置parseResultId
         const fileNameSpan = document.getElementById('chatgpt-file-name');
         fileNameSpan.textContent = file.name;
         fileNameSpan.classList.add('selected');
+
+        console.log('📁 选择文件:', file.name);
+        updateChatGPTDebugPanel();
 
         // 清理之前的结果
         hideChatGPTPrompt();
@@ -796,6 +856,10 @@ async function generateChatGPTPrompt() {
 
     const contractType = document.getElementById('chatgpt-contract-type').value;
 
+    console.log('🚀 开始生成ChatGPT提示...');
+    console.log('   文件:', chatgptFile.name);
+    console.log('   合同类型:', contractType);
+
     // 显示加载状态
     document.getElementById('chatgpt-generate-loading').style.display = 'block';
     hideChatGPTPrompt();
@@ -805,11 +869,16 @@ async function generateChatGPTPrompt() {
     formData.append('file', chatgptFile);
 
     try {
-        const url = `/chatgpt/generate-prompt?contractType=${contractType}`;
+        // 【关键修复】使用generate锚点模式，确保返回parseResultId
+        const url = `/chatgpt/generate-prompt?contractType=${contractType}&anchors=generate`;
+        console.log('📡 请求URL:', url);
+
         const response = await fetch(url, {
             method: 'POST',
             body: formData
         });
+
+        console.log('📥 收到响应，状态码:', response.status);
 
         if (!response.ok) {
             const errorData = await response.json();
@@ -817,11 +886,31 @@ async function generateChatGPTPrompt() {
         }
 
         const data = await response.json();
+
+        console.log('✅ 响应数据:', data);
+        console.log('   - parseResultId:', data.parseResultId);
+        console.log('   - chatgptPrompt 长度:', data.chatgptPrompt ? data.chatgptPrompt.length : 0);
+        console.log('   - anchorsEnabled:', data.anchorsEnabled);
+
+        // 【关键修复】保存parseResultId到全局变量
+        if (data.parseResultId) {
+            chatgptParseResultId = data.parseResultId;
+            console.log('✅ 【关键】已保存parseResultId到全局变量:', chatgptParseResultId);
+            console.log('   使用 window.chatgptParseResultId 可在控制台查看');
+            showToast('✅ 已生成锚点，parseResultId已保存用于后续批注', 'success');
+            updateChatGPTDebugPanel();
+        } else {
+            console.warn('⚠️ 响应中未包含parseResultId，后续批注可能不精确');
+            console.warn('   检查后端是否已修改 /generate-prompt 端点');
+            showToast('⚠️ 警告：未获取到parseResultId，批注定位精度可能降低', 'warning');
+        }
+
         showChatGPTPrompt(data);
         showToast('ChatGPT提示生成成功!', 'success');
 
     } catch (error) {
-        console.error('生成ChatGPT提示失败:', error);
+        console.error('❌ 生成ChatGPT提示失败:', error);
+        console.error('   错误信息:', error.message);
         showToast('生成提示失败: ' + error.message, 'error');
     } finally {
         document.getElementById('chatgpt-generate-loading').style.display = 'none';
@@ -937,15 +1026,40 @@ async function importChatGPTResult() {
 
     // 构建FormData
     const formData = new FormData();
-    formData.append('file', chatgptFile);
+    // 【关键修复】只有当成功获取parseResultId时才传递file，否则两个都传递
+    if (!chatgptParseResultId) {
+        // 降级方案：传递file（此时会使用不带锚点的文档）
+        formData.append('file', chatgptFile);
+        console.warn('⚠️ parseResultId不存在，将使用原始文件进行批注（可能定位不精确）');
+    }
     formData.append('chatgptResponse', chatgptResponse);
 
     try {
-        const url = `/chatgpt/import-result?cleanupAnchors=${cleanupAnchors}`;
+        // 【关键修复】构建URL并传递parseResultId参数
+        let url = `/chatgpt/import-result?cleanupAnchors=${cleanupAnchors}`;
+
+        console.log('🚀 开始导入ChatGPT审查结果...');
+        console.log('   cleanupAnchors:', cleanupAnchors);
+        console.log('   chatgptParseResultId:', chatgptParseResultId);
+
+        if (chatgptParseResultId) {
+            url += `&parseResultId=${encodeURIComponent(chatgptParseResultId)}`;
+            console.log('✅ 【关键】将传递parseResultId参数');
+            console.log('📡 请求URL:', url);
+            showToast('✅ 使用缓存的带锚点文档进行批注...', 'info');
+        } else {
+            console.warn('⚠️ parseResultId 不存在，将使用原始文件进行批注（可能定位不精确）');
+            console.warn('   当前 chatgptParseResultId:', chatgptParseResultId);
+            console.warn('   如果此值为 null，说明步骤1 可能没有正确执行');
+            showToast('⚠️ 警告：batch注定位可能不精确', 'warning');
+        }
+
         const response = await fetch(url, {
             method: 'POST',
             body: formData
         });
+
+        console.log('📥 收到响应，状态码:', response.status);
 
         if (!response.ok) {
             const errorData = await response.json();
@@ -957,11 +1071,14 @@ async function importChatGPTResult() {
         const filename = chatgptFile.name.replace('.docx', '_ChatGPT审查.docx');
         downloadFile(blob, filename);
 
-        showChatGPTImportResult(filename, parsedResponse.issues.length);
-        showToast('ChatGPT审查结果导入成功! 文档已下载', 'success');
+        console.log('✅ 文件下载成功:', filename);
+        showChatGPTImportResult(filename, parsedResponse.issues.length, !!chatgptParseResultId);
+        showToast('✅ ChatGPT审查结果导入成功! 文档已下载', 'success');
 
     } catch (error) {
-        console.error('导入ChatGPT审查结果失败:', error);
+        console.error('❌ 导入ChatGPT审查结果失败:', error);
+        console.error('   错误信息:', error.message);
+        console.error('   当前 parseResultId:', chatgptParseResultId);
         showToast('导入失败: ' + error.message, 'error');
     } finally {
         document.getElementById('chatgpt-import-loading').style.display = 'none';
@@ -994,14 +1111,19 @@ function analyzePreciseAnnotationSupport(issues) {
 }
 
 // 显示ChatGPT导入结果
-function showChatGPTImportResult(filename, issuesCount) {
+function showChatGPTImportResult(filename, issuesCount, usedAnchors = false) {
     const resultBox = document.getElementById('chatgpt-import-result');
     const summaryDiv = document.getElementById('chatgpt-import-summary');
+
+    // 【关键修复】根据是否使用了锚点显示不同的提示
+    const anchorStatusHTML = usedAnchors
+        ? '<p style="color: #28a745; font-weight: bold;">✅ 使用缓存的带锚点文档进行批注 - 定位精度最高</p>'
+        : '<p style="color: #ffc107; font-weight: bold;">⚠️ 使用原始文件进行批注 - 定位精度可能降低</p>';
 
     summaryDiv.innerHTML = `
         <div class="import-summary">
             <p><strong>📄 文件名:</strong> ${filename}</p>
-            <p><strong>✅ 状态:</strong> ChatGPT审查结果导入成功</p>
+            ${anchorStatusHTML}
             <p><strong>📊 问题数量:</strong> ${issuesCount || '?'} 条问题已批注</p>
             <p><strong>📑 流程:</strong> 文件解析 → ChatGPT审查 → 结果导入 → 批注生成</p>
             <p><strong>💡 说明:</strong> 审查意见已添加到合同相应位置（支持精确文字级别批注）</p>
@@ -1024,6 +1146,7 @@ function resetChatGPTForm() {
     document.getElementById('chatgpt-response').value = '';
     chatgptFile = null;
     chatgptPrompt = null;
+    chatgptParseResultId = null;  // 【关键修复】重置parseResultId
     hideChatGPTPrompt();
     hideChatGPTImport();
 }

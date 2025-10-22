@@ -17,10 +17,27 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * 合同批注服务
+ * 合同批注服务（POI方式）
  *
- * 负责根据审查结果在合同中插入批注
+ * ⚠️ @Deprecated 此类使用过时的POI方式实现批注功能
+ *
+ * 自版本 2.1.0 起，已废弃。建议迁移到 XmlContractAnnotateService，
+ * 原因：
+ * - XML方式提供更好的精确文字级批注支持
+ * - 性能更优，内存占用更低
+ * - 对复杂文档（如表格、文本框内文本）的支持更好
+ *
+ * 迁移指南：
+ * 1. 将 @Autowired private ContractAnnotateService 替换为
+ *    @Autowired private XmlContractAnnotateService
+ *
+ * 2. 将 annotateContract(...) 替换为 annotateContractWithXml(...)
+ *
+ * 详见文档: POI_TO_XML_MIGRATION_GUIDE.md
+ *
+ * @deprecated 使用 {@link XmlContractAnnotateService} 替代
  */
+@Deprecated(since = "2.1.0", forRemoval = true)
 @Service
 public class ContractAnnotateService {
 
@@ -35,13 +52,18 @@ public class ContractAnnotateService {
     /**
      * 为合同添加批注
      *
+     * ⚠️ @Deprecated - 自版本2.1.0起，请使用 XmlContractAnnotateService.annotateContractWithXml()
+     *
      * @param file 原始合同文件
      * @param reviewJson 审查结果JSON字符串
      * @param anchorStrategy 锚点定位策略: "preferAnchor", "anchorOnly", "textFallback"
      * @param cleanupAnchors 是否清理锚点
      * @return 带批注的文档字节数组
      * @throws IOException 文件处理失败
+     *
+     * @deprecated 使用 {@link XmlContractAnnotateService#annotateContractWithXml(MultipartFile, String, String, boolean)} 代替
      */
+    @Deprecated(since = "2.1.0", forRemoval = true)
     public byte[] annotateContract(MultipartFile file, String reviewJson,
                                    String anchorStrategy, boolean cleanupAnchors) throws IOException {
         logger.info("开始为合同添加批注: filename={}, anchorStrategy={}, cleanupAnchors={}",

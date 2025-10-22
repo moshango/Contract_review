@@ -62,8 +62,10 @@ public class ContractParseService {
             // 处理 .docx 文件
             XWPFDocument doc = docxUtils.loadDocx(file.getInputStream());
 
-            // 使用新的表格支持方法
-            clauses = docxUtils.extractClausesWithTables(doc, generateAnchors);
+            // 【修复】使用真实段落索引方法（解决虚拟索引混乱问题）
+            // 之前: extractClausesWithTables() 使用虚拟索引（混入表格），导致批注定位错误
+            // 现在: extractClausesWithCorrectIndex() 使用真实段落索引，确保批注定位准确
+            clauses = docxUtils.extractClausesWithCorrectIndex(doc, generateAnchors);
 
             title = docxUtils.extractTitle(doc);
             wordCount = docxUtils.countWords(doc);
@@ -125,12 +127,14 @@ public class ContractParseService {
         byte[] fileBytes = file.getBytes();
         XWPFDocument doc = docxUtils.loadDocx(new ByteArrayInputStream(fileBytes));
 
-        // 解析文档内容，支持表格
-        List<Clause> clauses = docxUtils.extractClausesWithTables(doc, generateAnchors);
+        // 【修复】使用真实段落索引方法（解决虚拟索引混乱问题）
+        List<Clause> clauses = docxUtils.extractClausesWithCorrectIndex(doc, generateAnchors);
 
         // 如果需要生成锚点,插入到文档中
         if (generateAnchors) {
+            logger.info("【工作流】开始插入锚点到文档中");
             docxUtils.insertAnchors(doc, clauses);
+            logger.info("【工作流】锚点插入完成");
         }
 
         // 提取其他信息
@@ -151,9 +155,18 @@ public class ContractParseService {
                 .build();
 
         // 生成文档字节数组
-        byte[] documentBytes = generateAnchors ? docxUtils.writeToBytes(doc) : null;
+        byte[] documentBytes = null;
+        if (generateAnchors) {
+            logger.info("【工作流】开始将修改的文档保存为字节数组");
+            documentBytes = docxUtils.writeToBytes(doc);
+            logger.info("【工作流】文档字节数组生成完成: 大小={} 字节",
+                       documentBytes != null ? documentBytes.length : 0);
+        } else {
+            logger.info("【工作流】未启用锚点生成，documentBytes=null");
+        }
 
-        logger.info("解析完成并生成带锚点文档: title={}, clauses={}", title, clauses.size());
+        logger.info("解析完成并生成带锚点文档: title={}, clauses={}, documentBytes大小={}",
+                   title, clauses.size(), documentBytes != null ? documentBytes.length : 0);
 
         return new ParseResultWithDocument(parseResult, documentBytes);
     }

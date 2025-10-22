@@ -271,9 +271,9 @@ public class DocxUtils {
                         .endParaIndex(endIndex)
                         .build();
 
-                // 生成锚点ID
+                // 生成锚点ID（使用完整的 Clause 对象以确保确定性）
                 if (generateAnchors) {
-                    clause.setAnchorId(generateAnchorId(clauseId));
+                    clause.setAnchorId(generateAnchorId(clause));
                 }
 
                 clauses.add(clause);
@@ -322,6 +322,135 @@ public class DocxUtils {
         }
 
         return text.toString();
+    }
+
+    /**
+     * ✨ 新方法：使用真实段落索引提取条款（修复版本）
+     *
+     * 这个版本确保 startParaIndex 与 XWPFDocument.getParagraphs() 的索引完全一致
+     * 解决了之前混合 DocumentElement 导致的索引不一致问题
+     *
+     * @param doc XWPFDocument 对象
+     * @param generateAnchors 是否生成锚点
+     * @return 条款列表（使用正确的段落索引）
+     *
+     * ⚠️ 关键改进：
+     * - 直接使用 XWPFDocument.getParagraphs()，避免虚拟索引
+     * - startParaIndex 与实际 Word 段落索引一一对应
+     * - 书签写入位置准确，Annotate 时能正确定位
+     */
+    public List<Clause> extractClausesWithCorrectIndex(XWPFDocument doc, boolean generateAnchors) {
+        List<Clause> clauses = new ArrayList<>();
+        List<XWPFParagraph> allParagraphs = doc.getParagraphs();
+        int clauseCounter = 0;
+
+        logger.info("【修复版本】开始提取条款（使用正确的真实段落索引）");
+        logger.debug("总段落数={}, 生成锚点={}", allParagraphs.size(), generateAnchors);
+
+        for (int i = 0; i < allParagraphs.size(); i++) {
+            String text = allParagraphs.get(i).getText();
+
+            // 识别条款标题
+            if (isClauseHeading(text)) {
+                clauseCounter++;
+                String clauseId = "c" + clauseCounter;
+
+                logger.info("✓ 发现条款 [clauseId={}] 在真实段落索引 [{}]，标题: '{}'",
+                           clauseId, i, text);
+
+                // 收集该条款的内容
+                StringBuilder clauseText = new StringBuilder();
+                int startIndex = i;  // 真实索引
+                int endIndex = i;
+
+                // 从下一个段落开始收集内容，直到遇到下一个条款标题
+                for (int j = i + 1; j < allParagraphs.size(); j++) {
+                    String nextText = allParagraphs.get(j).getText();
+
+                    // 遇到下一个条款标题，停止收集
+                    if (isClauseHeading(nextText)) {
+                        break;
+                    }
+
+                    if (!nextText.trim().isEmpty()) {
+                        clauseText.append(nextText).append("\n");
+                        endIndex = j;
+                    }
+                }
+
+                // 构建条款对象（重要：使用真实索引）
+                Clause clause = Clause.builder()
+                        .id(clauseId)
+                        .heading(text)
+                        .text(clauseText.toString().trim())
+                        .startParaIndex(startIndex)   // ✓ 真实索引
+                        .endParaIndex(endIndex)       // ✓ 真实索引
+                        .build();
+
+                // 生成锚点ID（使用完整的 Clause 对象以确保确定性）
+                if (generateAnchors) {
+                    String anchorId = generateAnchorId(clause);
+                    clause.setAnchorId(anchorId);
+                    logger.info("  生成锚点: anchorId={}", anchorId);
+                }
+
+                clauses.add(clause);
+                logger.debug("条款对象创建: id={}, 锚点={}, 真实段落范围=[{}-{}]",
+                           clauseId, clause.getAnchorId(), startIndex, endIndex);
+            }
+        }
+
+        logger.info("【修复版本】条款提取完成: 共找到 {} 个条款", clauses.size());
+
+        // 验证索引一致性
+        validateClauseIndexes(doc, clauses);
+
+        return clauses;
+    }
+
+    /**
+     * 验证条款索引的一致性
+     * 确保 startParaIndex 与 XWPFDocument.getParagraphs() 中的实际段落对应
+     *
+     * @param doc XWPFDocument 对象
+     * @param clauses 条款列表
+     */
+    private void validateClauseIndexes(XWPFDocument doc, List<Clause> clauses) {
+        logger.info("【验证】开始验证条款索引一致性...");
+
+        List<XWPFParagraph> paragraphs = doc.getParagraphs();
+        int issues = 0;
+
+        for (Clause clause : clauses) {
+            Integer startIndex = clause.getStartParaIndex();
+            if (startIndex == null || startIndex < 0 || startIndex >= paragraphs.size()) {
+                logger.warn("❌ 索引越界: clauseId={}, startParaIndex={}, 总段落数={}",
+                           clause.getId(), startIndex, paragraphs.size());
+                issues++;
+                continue;
+            }
+
+            String indexedText = paragraphs.get(startIndex).getText();
+            String expectedText = clause.getHeading();
+
+            if (!indexedText.equals(expectedText)) {
+                logger.warn("⚠️ 索引不匹配: clauseId={}, startParaIndex={}",
+                           clause.getId(), startIndex);
+                logger.warn("   期望: '{}...'", expectedText.substring(0, Math.min(50, expectedText.length())));
+                logger.warn("   实际: '{}...'", indexedText.substring(0, Math.min(50, indexedText.length())));
+                issues++;
+            } else {
+                logger.debug("✓ 索引一致: clauseId={}, startParaIndex={}, 文本='{}'",
+                           clause.getId(), startIndex,
+                           expectedText.substring(0, Math.min(40, expectedText.length())));
+            }
+        }
+
+        if (issues == 0) {
+            logger.info("✓ 所有条款索引验证通过！");
+        } else {
+            logger.warn("⚠️ 发现 {} 个索引问题，请检查！", issues);
+        }
     }
 
     /**
@@ -375,9 +504,9 @@ public class DocxUtils {
                         .endParaIndex(endIndex)
                         .build();
 
-                // 生成锚点ID
+                // 生成锚点ID（使用完整的 Clause 对象以确保确定性）
                 if (generateAnchors) {
-                    clause.setAnchorId(generateAnchorId(clauseId));
+                    clause.setAnchorId(generateAnchorId(clause));
                 }
 
                 clauses.add(clause);
@@ -454,21 +583,69 @@ public class DocxUtils {
      * @param clauseId 条款ID
      * @return 锚点ID
      */
-    public String generateAnchorId(String clauseId) {
+    /**
+     * 生成确定性锚点ID（修复：移除时间戳依赖）
+     *
+     * ✨ 修复说明:
+     * - 原方法使用时间戳，导致同一文档不同时间生成不同ID
+     * - 新方法使用条款内容哈希，确保幂等性
+     * - 同一文档在任何时间解析都生成相同的锚点ID
+     *
+     * @param clause 条款对象
+     * @return 稳定的锚点ID，格式: anc-c1-8f3a1b2c
+     */
+    public String generateAnchorId(Clause clause) {
         try {
-            String timestamp = String.valueOf(System.currentTimeMillis());
-            String input = clauseId + timestamp;
+            String clauseId = clause.getId();
+            String heading = clause.getHeading() != null ? clause.getHeading() : "";
+            String text = clause.getText() != null ? clause.getText() : "";
 
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] hash = md.digest(input.getBytes());
-            String fullHash = String.format("%032x", new BigInteger(1, hash));
-            String shortHash = fullHash.substring(0, 4);
+            // 使用条款ID + 标题 + 前100字符内容作为种子
+            // 确保内容哈希稳定性
+            int contentLen = Math.min(100, text.length());
+            String content = contentLen > 0 ? text.substring(0, contentLen) : "";
 
-            return "anc-" + clauseId + "-" + shortHash;
-        } catch (NoSuchAlgorithmException e) {
-            logger.error("生成锚点ID失败", e);
-            return "anc-" + clauseId + "-" + UUID.randomUUID().toString().substring(0, 4);
+            // 构造确定性输入：不包含时间戳
+            String hashInput = clauseId + "|" + heading + "|" + content;
+
+            // 使用 SHA-256 产生稳定的哈希
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = md.digest(hashInput.getBytes("UTF-8"));
+
+            // 取前8个十六进制字符（4个字节）
+            StringBuilder hashHex = new StringBuilder();
+            for (int i = 0; i < 4; i++) {
+                hashHex.append(String.format("%02x", hashBytes[i] & 0xFF));
+            }
+
+            String anchorId = "anc-" + clauseId + "-" + hashHex.toString();
+            logger.debug("生成确定性锚点: clauseId={}, heading={}, anchorId={}",
+                         clauseId, heading.length() > 20 ? heading.substring(0, 20) + "..." : heading, anchorId);
+
+            return anchorId;
+        } catch (Exception e) {
+            logger.error("生成锚点ID失败: {}", e.getMessage());
+            String clauseId = clause.getId() != null ? clause.getId() : "unknown";
+            // 回退方案（仅在特殊环境中）
+            return "anc-" + clauseId + "-" + UUID.randomUUID().toString().substring(0, 8);
         }
+    }
+
+    /**
+     * 生成确定性锚点ID - 重载版本（保持向后兼容，调用新方法）
+     *
+     * @deprecated 已弃用，请使用 {@link #generateAnchorId(Clause)}
+     * @param clauseId 条款ID
+     * @return 锚点ID（使用默认内容）
+     */
+    @Deprecated(since = "2.4.0", forRemoval = true)
+    public String generateAnchorId(String clauseId) {
+        // 创建一个虚拟 Clause 对象以保持兼容
+        return generateAnchorId(Clause.builder()
+                .id(clauseId)
+                .heading("")
+                .text("")
+                .build());
     }
 
     /**
@@ -479,20 +656,44 @@ public class DocxUtils {
      */
     public void insertAnchors(XWPFDocument doc, List<Clause> clauses) {
         List<XWPFParagraph> paragraphs = doc.getParagraphs();
+        logger.info("【锚点插入】开始插入锚点: 文档段落数={}, 条款数={}", paragraphs.size(), clauses.size());
+
+        int successCount = 0;
+        int skipCount = 0;
+
+        // 【诊断】详细打印每个条款的信息
+        for (int idx = 0; idx < clauses.size(); idx++) {
+            Clause clause = clauses.get(idx);
+            logger.info("【锚点插入】条款[{}]: id={}, anchorId={}, startParaIndex={}, heading='{}'",
+                       idx, clause.getId(), clause.getAnchorId(), clause.getStartParaIndex(),
+                       clause.getHeading());
+        }
 
         for (Clause clause : clauses) {
             if (clause.getAnchorId() == null || clause.getStartParaIndex() == null) {
+                logger.debug("【锚点插入】跳过条款: clauseId={}, anchorId=null或startParaIndex=null",
+                           clause.getId());
+                skipCount++;
                 continue;
             }
 
             int paraIndex = clause.getStartParaIndex();
             if (paraIndex >= 0 && paraIndex < paragraphs.size()) {
                 XWPFParagraph para = paragraphs.get(paraIndex);
+                logger.info("【锚点插入】为条款添加书签: clauseId={}, anchorId={}, paraIndex={}",
+                           clause.getId(), clause.getAnchorId(), paraIndex);
 
                 // 在段落开头插入书签
                 addBookmarkToParagraph(para, clause.getAnchorId());
+                successCount++;
+            } else {
+                logger.warn("【锚点插入】段落索引超出范围: clauseId={}, anchorId={}, paraIndex={}, 总段落数={}",
+                           clause.getId(), clause.getAnchorId(), paraIndex, paragraphs.size());
+                skipCount++;
             }
         }
+
+        logger.info("【锚点插入】完成: 成功插入={}个, 跳过={}", successCount, skipCount);
     }
 
     /**
@@ -505,16 +706,22 @@ public class DocxUtils {
         // 获取段落的CTP对象
         org.openxmlformats.schemas.wordprocessingml.x2006.main.CTP ctp = paragraph.getCTP();
 
+        logger.debug("【书签添加】段落当前书签数: {}", ctp.getBookmarkStartList().size());
+
         // 创建书签起始标记
         org.openxmlformats.schemas.wordprocessingml.x2006.main.CTBookmark bookmarkStart =
             ctp.addNewBookmarkStart();
         bookmarkStart.setName(bookmarkName);
-        bookmarkStart.setId(BigInteger.valueOf(System.currentTimeMillis() % 1000000));
+        BigInteger bookmarkId = BigInteger.valueOf(System.currentTimeMillis() % 1000000);
+        bookmarkStart.setId(bookmarkId);
 
         // 创建书签结束标记
         org.openxmlformats.schemas.wordprocessingml.x2006.main.CTMarkupRange bookmarkEnd =
             ctp.addNewBookmarkEnd();
-        bookmarkEnd.setId(bookmarkStart.getId());
+        bookmarkEnd.setId(bookmarkId);
+
+        logger.debug("【书签添加】书签已添加: bookmarkName={}, bookmarkId={}, 段落现在有{}个书签",
+                   bookmarkName, bookmarkId, ctp.getBookmarkStartList().size());
     }
 
     /**
@@ -876,9 +1083,33 @@ public class DocxUtils {
      * @throws IOException 写入失败
      */
     public byte[] writeToBytes(XWPFDocument doc) throws IOException {
+        // 【诊断】在保存前检查文档中的书签
+        List<XWPFParagraph> paragraphs = doc.getParagraphs();
+        int totalBookmarks = 0;
+        StringBuilder bookmarkLog = new StringBuilder();
+
+        for (int i = 0; i < paragraphs.size(); i++) {
+            XWPFParagraph para = paragraphs.get(i);
+            org.openxmlformats.schemas.wordprocessingml.x2006.main.CTP ctp = para.getCTP();
+            int bookmarkCount = ctp.getBookmarkStartList().size();
+            totalBookmarks += bookmarkCount;
+
+            if (bookmarkCount > 0) {
+                for (var bookmark : ctp.getBookmarkStartList()) {
+                    String bookmarkName = bookmark.getName();
+                    bookmarkLog.append(String.format("[Para%d: %s] ", i, bookmarkName));
+                }
+            }
+        }
+
+        logger.info("【文档保存】即将保存文档: 总段落数={}, 总书签数={}, 书签列表: {}",
+                   paragraphs.size(), totalBookmarks, bookmarkLog.toString().isEmpty() ? "无" : bookmarkLog.toString());
+
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             doc.write(baos);
-            return baos.toByteArray();
+            byte[] bytes = baos.toByteArray();
+            logger.info("【文档保存】文档已保存到字节数组: 文档大小={} 字节", bytes.length);
+            return bytes;
         }
     }
 }
