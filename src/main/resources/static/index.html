@@ -19,6 +19,7 @@
             <!-- 功能选项卡 -->
             <div class="tabs">
                 <button class="tab-btn active" onclick="switchTab('parse')">📄 合同解析</button>
+                <button class="tab-btn" onclick="switchTab('rule-review')">🔍 规则审查</button>
                 <button class="tab-btn" onclick="switchTab('annotate')">✍️ 合同批注</button>
                 <button class="tab-btn" onclick="switchTab('auto-review')">🚀 自动化审查</button>
                 <button class="tab-btn" onclick="switchTab('chatgpt')">💬 ChatGPT集成</button>
@@ -73,6 +74,168 @@
                 <div id="parse-loading" class="loading" style="display: none;">
                     <div class="spinner"></div>
                     <p>正在解析合同,请稍候...</p>
+                </div>
+            </div>
+
+            <!-- 规则审查面板 -->
+            <div id="rule-review-panel" class="panel">
+                <div class="panel-header">
+                    <h2>🔍 规则审查</h2>
+                    <p>通过本地规则引擎快速筛选疑似问题条款，减少LLM审查压力</p>
+                </div>
+
+                <div class="info-box" style="background-color: #e3f2fd; border-left: 4px solid #2196F3; padding: 12px; margin-bottom: 20px; border-radius: 4px;">
+                    <strong>💡 工作原理：</strong> 系统先通过关键字/正则规则快速筛选"疑似问题"条款，然后为LLM生成结构化Prompt，只审查筛选后的内容。这样可以减少80%的LLM token消耗，加快审查速度。
+                </div>
+
+                <!-- 步骤1: 文件上传和合同类型选择 -->
+                <div class="form-group">
+                    <label class="file-upload-label">
+                        <input type="file" id="rule-review-file" accept=".docx,.doc" onchange="handleRuleReviewFileSelect(this)">
+                        <span class="file-upload-btn">📁 选择合同文件</span>
+                        <span class="file-name" id="rule-review-file-name">支持 .docx 和 .doc 格式</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label for="rule-review-contract-type">合同类型:</label>
+                    <select id="rule-review-contract-type">
+                        <option value="通用合同">通用合同</option>
+                        <option value="采购">采购合同</option>
+                        <option value="外包">外包合同</option>
+                        <option value="NDA">保密协议(NDA)</option>
+                    </select>
+                </div>
+
+                <button class="btn btn-primary btn-large" onclick="startRuleReview()">
+                    <span class="btn-icon">🔍</span> 开始规则审查
+                </button>
+
+                <!-- 加载动画 -->
+                <div id="rule-review-loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>正在分析合同，应用规则匹配...</p>
+                </div>
+
+                <!-- 审查结果面板 -->
+                <div id="rule-review-result" class="result-box" style="display: none;">
+                    <h3>审查分析结果</h3>
+
+                    <!-- 统计信息 -->
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px;">
+                        <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; text-align: center;">
+                            <div style="font-size: 24px; font-weight: bold; color: #2196F3;" id="stat-total-clauses">0</div>
+                            <div style="color: #666; font-size: 14px; margin-top: 5px;">总条款数</div>
+                        </div>
+                        <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; text-align: center;">
+                            <div style="font-size: 24px; font-weight: bold; color: #FF9800;" id="stat-matched-clauses">0</div>
+                            <div style="color: #666; font-size: 14px; margin-top: 5px;">匹配条款</div>
+                        </div>
+                        <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; text-align: center;">
+                            <div style="font-size: 24px; font-weight: bold; color: #F44336;" id="stat-high-risk">0</div>
+                            <div style="color: #666; font-size: 14px; margin-top: 5px;">高风险</div>
+                        </div>
+                        <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; text-align: center;">
+                            <div style="font-size: 24px; font-weight: bold; color: #4CAF50;" id="stat-total-rules">0</div>
+                            <div style="color: #666; font-size: 14px; margin-top: 5px;">触发规则</div>
+                        </div>
+                    </div>
+
+                    <!-- 风险分布 -->
+                    <div style="background: #f9f9f9; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                        <h4>📊 风险分布</h4>
+                        <div style="display: flex; gap: 20px; margin-top: 10px;">
+                            <div><span style="display: inline-block; width: 12px; height: 12px; background: #F44336; border-radius: 2px; margin-right: 5px;"></span>高风险: <span id="risk-high">0</span></div>
+                            <div><span style="display: inline-block; width: 12px; height: 12px; background: #FF9800; border-radius: 2px; margin-right: 5px;"></span>中风险: <span id="risk-medium">0</span></div>
+                            <div><span style="display: inline-block; width: 12px; height: 12px; background: #FFC107; border-radius: 2px; margin-right: 5px;"></span>低风险: <span id="risk-low">0</span></div>
+                        </div>
+                    </div>
+
+                    <!-- 匹配条款列表 -->
+                    <h4>📋 匹配的条款详情</h4>
+                    <div id="rule-review-clauses" style="max-height: 600px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px;">
+                        <!-- 条款内容将被填充到这里 -->
+                    </div>
+
+                    <!-- 生成的 Prompt -->
+                    <h4 style="margin-top: 20px;">📝 LLM审查Prompt</h4>
+                    <div style="background: #f5f5f5; padding: 12px; border-radius: 4px; margin-bottom: 15px;">
+                        <p style="color: #666; font-size: 13px; margin-bottom: 10px;">下方是为LLM生成的结构化Prompt，包含所有匹配的条款和检查要点。可直接复制到ChatGPT、Claude等LLM进行审查。</p>
+                    </div>
+                    <div style="background: #f0f0f0; padding: 15px; border-radius: 4px; border: 1px solid #ddd; max-height: 400px; overflow-y: auto;">
+                        <pre id="rule-review-prompt" style="margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; font-family: 'Courier New', monospace;"></pre>
+                    </div>
+
+                    <!-- 操作按钮 -->
+                    <div class="button-group" style="margin-top: 20px;">
+                        <button class="btn btn-primary" onclick="copyRuleReviewPrompt()">
+                            <span class="btn-icon">📋</span> 复制Prompt到剪贴板
+                        </button>
+                        <button class="btn btn-secondary" onclick="openChatGPTWithPrompt()">
+                            <span class="btn-icon">🌐</span> 打开ChatGPT
+                        </button>
+                        <button class="btn btn-ghost" onclick="downloadRuleReviewResult()">
+                            <span class="btn-icon">💾</span> 下载结果
+                        </button>
+                    </div>
+
+                    <!-- 导入ChatGPT审查结果部分 -->
+                    <div id="rule-review-import-section" style="margin-top: 30px; padding-top: 30px; border-top: 2px solid #ddd;">
+                        <h3>📥 步骤2: 导入ChatGPT审查结果</h3>
+                        <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin-bottom: 15px; border-radius: 4px;">
+                            <strong>💡 提示:</strong> 将ChatGPT返回的JSON审查结果粘贴到下方，系统将自动插入批注并生成文档
+                        </div>
+
+                        <div class="form-group">
+                            <label for="rule-review-response">ChatGPT审查结果JSON:</label>
+                            <textarea
+                                id="rule-review-response"
+                                rows="12"
+                                placeholder="请将ChatGPT的完整回复粘贴到这里（包括JSON格式的审查结果）..."
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 12px;"
+                            ></textarea>
+                            <div style="font-size: 12px; color: #666; margin-top: 8px;">
+                                💡 支持直接粘贴带有 ```json 代码块的回复，系统会自动清理格式
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="rule-review-cleanup-anchors" checked>
+                                <span>批注完成后清理锚点</span>
+                            </label>
+                        </div>
+
+                        <button class="btn btn-primary btn-large" onclick="importRuleReviewResult()">
+                            <span class="btn-icon">📥</span> 导入并生成批注文档
+                        </button>
+
+                        <div id="rule-review-import-loading" class="loading" style="display: none;">
+                            <div class="spinner"></div>
+                            <p>正在生成批注文档，请稍候...</p>
+                        </div>
+                    </div>
+
+                    <!-- 导入结果提示 -->
+                    <div id="rule-review-import-result" class="result-box" style="display: none; margin-top: 20px;">
+                        <h3>✅ 批注文档生成完成</h3>
+                        <div id="rule-review-import-summary"></div>
+                        <p class="success-message">带批注的合同文档已自动下载!</p>
+                        <button class="btn btn-secondary" onclick="resetRuleReviewForm()">继续审查</button>
+                    </div>
+
+                    <!-- 后续步骤提示 -->
+                    <div style="background: #e8f5e9; border-left: 4px solid #4CAF50; padding: 12px; margin-top: 20px; border-radius: 4px;">
+                        <strong>📌 完整工作流程：</strong>
+                        <ol style="margin: 10px 0; padding-left: 20px;">
+                            <li>点击"开始规则审查"分析合同</li>
+                            <li>复制生成的 Prompt 到 ChatGPT 进行审查</li>
+                            <li>ChatGPT 返回 JSON 格式的审查结果</li>
+                            <li>将结果粘贴到下方"ChatGPT审查结果JSON"输入框</li>
+                            <li>点击"导入并生成批注文档"自动批注并下载</li>
+                            <li>✅ 完成！获得带详细批注的合同文档</li>
+                        </ol>
+                    </div>
                 </div>
             </div>
 

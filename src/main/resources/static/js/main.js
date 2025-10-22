@@ -1147,6 +1147,285 @@ function resetChatGPTForm() {
     chatgptFile = null;
     chatgptPrompt = null;
     chatgptParseResultId = null;  // 【关键修复】重置parseResultId
-    hideChatGPTPrompt();
-    hideChatGPTImport();
+}
+
+// ============= 规则审查功能 =============
+let ruleReviewFile = null;
+let ruleReviewResult = null;
+
+// 处理规则审查文件选择
+function handleRuleReviewFileSelect(input) {
+    const file = input.files[0];
+    if (file) {
+        ruleReviewFile = file;
+        const fileNameSpan = document.getElementById('rule-review-file-name');
+        fileNameSpan.textContent = file.name;
+        fileNameSpan.classList.add('selected');
+    }
+}
+
+// 启动规则审查
+async function startRuleReview() {
+    if (!ruleReviewFile) {
+        showToast('请先选择合同文件', 'error');
+        return;
+    }
+
+    const contractType = document.getElementById('rule-review-contract-type').value;
+
+    showLoading('rule-review');
+    document.getElementById('rule-review-result').style.display = 'none';
+
+    const formData = new FormData();
+    formData.append('file', ruleReviewFile);
+
+    try {
+        const response = await fetch(`/api/review/analyze?contractType=${encodeURIComponent(contractType)}`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || '规则审查失败');
+        }
+
+        const data = await response.json();
+        ruleReviewResult = data;
+
+        // 更新统计信息
+        document.getElementById('stat-total-clauses').textContent = data.statistics.totalClauses;
+        document.getElementById('stat-matched-clauses').textContent = data.statistics.matchedClauses;
+        document.getElementById('stat-high-risk').textContent = data.statistics.highRiskClauses;
+        document.getElementById('stat-total-rules').textContent = data.statistics.totalMatchedRules;
+
+        // 更新风险分布
+        document.getElementById('risk-high').textContent = data.guidance.riskDistribution.high;
+        document.getElementById('risk-medium').textContent = data.guidance.riskDistribution.medium;
+        document.getElementById('risk-low').textContent = data.guidance.riskDistribution.low;
+
+        // 显示匹配的条款
+        displayRuleReviewClauses(data.matchResults);
+
+        // 显示 Prompt
+        document.getElementById('rule-review-prompt').textContent = data.prompt;
+
+        // 显示结果
+        document.getElementById('rule-review-result').style.display = 'block';
+        document.getElementById('rule-review-loading').style.display = 'none';
+
+        showToast(`✅ 审查完成! 检出${data.statistics.matchedClauses}个需要审查的条款`, 'success');
+
+    } catch (error) {
+        hideLoading('rule-review');
+        showToast('规则审查失败: ' + error.message, 'error');
+    }
+}
+
+// 显示规则审查匹配的条款
+function displayRuleReviewClauses(clauses) {
+    const clausesDiv = document.getElementById('rule-review-clauses');
+    let html = '';
+
+    clauses.forEach((clause, index) => {
+        const riskColorMap = {
+            'high': '#F44336',
+            'medium': '#FF9800',
+            'low': '#FFC107'
+        };
+        const riskColor = riskColorMap[clause.riskLevel] || '#999';
+
+        html += `
+            <div style="border-bottom: 1px solid #eee; padding: 15px; margin-bottom: 10px;">
+                <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                    <span style="display: inline-block; width: 8px; height: 8px; background: ${riskColor}; border-radius: 50%; margin-right: 10px;"></span>
+                    <strong style="font-size: 16px;">${clause.clauseId} - ${clause.heading}</strong>
+                    <span style="margin-left: 10px; padding: 3px 8px; background: ${riskColor}; color: white; border-radius: 3px; font-size: 12px;">${clause.riskLevel.toUpperCase()}</span>
+                    <span style="margin-left: auto; color: #666; font-size: 12px;">${clause.matchedRuleCount} 条规则匹配</span>
+                </div>
+
+                <div style="background: #f9f9f9; padding: 10px; border-left: 3px solid ${riskColor}; margin-bottom: 10px; border-radius: 2px;">
+                    <div style="font-size: 13px; line-height: 1.6; color: #333;">
+                        ${clause.matchedRules.map(rule => `
+                            <div style="margin-bottom: 12px;">
+                                <strong style="color: ${riskColor};">【${rule.risk.toUpperCase()}】 ${rule.id || '规则'}</strong>
+                                ${rule.matchedKeywords ? `
+                                    <div style="margin: 5px 0; font-size: 11px; color: #999;">
+                                        🔍 匹配关键词: <span style="background: #ffffcc; padding: 2px 4px; border-radius: 2px;">${rule.matchedKeywords.join(', ')}</span>
+                                    </div>
+                                ` : ''}
+                                <p style="margin: 5px 0; font-size: 12px; color: #666;">${rule.checklist.split('\n').join('<br>')}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    clausesDiv.innerHTML = html || '<p style="padding: 15px; color: #999;">未检出匹配的条款</p>';
+}
+
+// 复制规则审查 Prompt
+function copyRuleReviewPrompt() {
+    const prompt = document.getElementById('rule-review-prompt').textContent;
+    if (!prompt) {
+        showToast('没有可复制的内容', 'error');
+        return;
+    }
+
+    navigator.clipboard.writeText(prompt).then(() => {
+        showToast('✅ Prompt 已复制到剪贴板', 'success');
+    }).catch(() => {
+        // 备选方案：使用 textarea
+        const textarea = document.createElement('textarea');
+        textarea.value = prompt;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showToast('✅ Prompt 已复制到剪贴板', 'success');
+    });
+}
+
+// 打开 ChatGPT 并复制 Prompt
+function openChatGPTWithPrompt() {
+    copyRuleReviewPrompt();
+    window.open('https://chatgpt.com', '_blank');
+}
+
+// 下载规则审查结果
+function downloadRuleReviewResult() {
+    if (!ruleReviewResult) {
+        showToast('没有可下载的结果', 'error');
+        return;
+    }
+
+    const dataStr = JSON.stringify(ruleReviewResult, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = `rule-review-result-${new Date().getTime()}.json`;
+    link.click();
+
+    showToast('✅ 结果已下载', 'success');
+}
+
+// 步骤2: 导入规则审查结果
+async function importRuleReviewResult() {
+    if (!ruleReviewFile) {
+        showToast('请先选择合同文件', 'error');
+        return;
+    }
+
+    const chatgptResponse = document.getElementById('rule-review-response').value.trim();
+    if (!chatgptResponse) {
+        showToast('请输入ChatGPT的审查结果', 'error');
+        return;
+    }
+
+    // 验证ChatGPT响应格式
+    let parsedResponse = null;
+    try {
+        // 清理响应（移除markdown代码块）
+        let cleanResponse = chatgptResponse.trim();
+        if (cleanResponse.startsWith('```json')) {
+            cleanResponse = cleanResponse.substring(7);
+        }
+        if (cleanResponse.startsWith('```')) {
+            cleanResponse = cleanResponse.substring(3);
+        }
+        if (cleanResponse.endsWith('```')) {
+            cleanResponse = cleanResponse.substring(0, cleanResponse.length - 3);
+        }
+
+        parsedResponse = JSON.parse(cleanResponse.trim());
+        if (!parsedResponse.issues) {
+            throw new Error('ChatGPT响应缺少必需的issues字段');
+        }
+
+    } catch (e) {
+        showToast('ChatGPT响应格式错误，请检查JSON格式', 'error');
+        return;
+    }
+
+    const cleanupAnchors = document.getElementById('rule-review-cleanup-anchors').checked;
+
+    // 显示加载状态
+    document.getElementById('rule-review-import-loading').style.display = 'block';
+    document.getElementById('rule-review-import-result').style.display = 'none';
+
+    // 构建FormData - 使用带锚点的文档进行批注
+    const formData = new FormData();
+    formData.append('file', ruleReviewFile);
+    formData.append('review', chatgptResponse);
+
+    try {
+        // 调用 /annotate 接口进行批注
+        const url = `/api/annotate?anchorStrategy=preferAnchor&cleanupAnchors=${cleanupAnchors}`;
+
+        console.log('🚀 开始导入规则审查结果...');
+        console.log('   文件:', ruleReviewFile.name);
+        console.log('   cleanupAnchors:', cleanupAnchors);
+        console.log('   问题数量:', parsedResponse.issues.length);
+
+        const response = await fetch(url, {
+            method: 'POST',
+            body: formData
+        });
+
+        console.log('📥 收到响应，状态码:', response.status);
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '导入审查结果失败');
+        }
+
+        // 下载批注后的文件
+        const blob = await response.blob();
+        const filename = ruleReviewFile.name.replace('.docx', '_规则审查批注.docx');
+        downloadFile(blob, filename);
+
+        console.log('✅ 文件下载成功:', filename);
+        showRuleReviewImportResult(filename, parsedResponse.issues.length);
+        showToast('✅ 规则审查结果导入成功! 文档已下载', 'success');
+
+    } catch (error) {
+        console.error('❌ 导入规则审查结果失败:', error);
+        console.error('   错误信息:', error.message);
+        showToast('导入失败: ' + error.message, 'error');
+    } finally {
+        document.getElementById('rule-review-import-loading').style.display = 'none';
+    }
+}
+
+// 显示规则审查导入结果
+function showRuleReviewImportResult(filename, issuesCount) {
+    const resultBox = document.getElementById('rule-review-import-result');
+    const summaryDiv = document.getElementById('rule-review-import-summary');
+
+    summaryDiv.innerHTML = `
+        <div class="import-summary">
+            <p><strong>📄 文件名:</strong> ${filename}</p>
+            <p><strong>✅ 状态:</strong> 规则审查结果导入成功</p>
+            <p><strong>📊 问题数量:</strong> ${issuesCount || '?'} 条问题已批注</p>
+            <p><strong>📑 流程:</strong> 规则匹配 → ChatGPT审查 → 结果导入 → 批注生成</p>
+            <p><strong>💡 说明:</strong> 审查意见已添加到合同相应位置（支持精确文字级别批注）</p>
+        </div>
+    `;
+
+    resultBox.style.display = 'block';
+}
+
+// 重置规则审查表单
+function resetRuleReviewForm() {
+    document.getElementById('rule-review-file').value = '';
+    document.getElementById('rule-review-file-name').textContent = '支持 .docx 和 .doc 格式';
+    document.getElementById('rule-review-file-name').classList.remove('selected');
+    document.getElementById('rule-review-response').value = '';
+    ruleReviewFile = null;
+    ruleReviewResult = null;
+    document.getElementById('rule-review-result').style.display = 'none';
+    document.getElementById('rule-review-import-result').style.display = 'none';
+    showToast('表单已重置，可继续审查其他合同', 'success');
 }
