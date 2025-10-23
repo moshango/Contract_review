@@ -26,7 +26,7 @@ public class QwenClient {
     @Value("${qwen.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}")
     private String baseUrl;
 
-    @Value("${qwen.api-key}")
+    @Value("${qwen.api-key:}")
     private String apiKey;
 
     @Value("${qwen.model:qwen-max}")
