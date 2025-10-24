@@ -106,6 +106,24 @@
                         <option value="NDA">保密协议(NDA)</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label>审查立场: (选择您的身份，获得针对性的审查建议)</label>
+                    <div style="display: flex; gap: 15px; margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px;">
+                        <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="radio" name="rule-review-stance" value="Neutral" checked>
+                            <span><strong>中立</strong> (显示所有通用规则)</span>
+                        </label>
+                        <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="radio" name="rule-review-stance" value="A">
+                            <span><strong>甲方</strong> (获得甲方有利的建议)</span>
+                        </label>
+                        <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="radio" name="rule-review-stance" value="B">
+                            <span><strong>乙方</strong> (获得乙方有利的建议)</span>
+                        </label>
+                    </div>
+                    <p style="font-size: 12px; color: #666; margin-top: 8px;">💡 提示：不同立场会返回针对性的审查建议。甲方更关注条款对自己的不利；乙方更关注如何保护自己的权益。</p>
+                </div>
 
                 <button class="btn btn-primary btn-large" onclick="startRuleReview()">
                     <span class="btn-icon">🔍</span> 开始规则审查
@@ -168,6 +186,10 @@
 
                     <!-- 操作按钮 -->
                     <div class="button-group" style="margin-top: 20px;">
+                        <!-- 一键Qwen审查按钮 -->
+                        <button class="btn btn-success" id="qwen-review-btn" onclick="startQwenReview()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none;">
+                            <span class="btn-icon">⚡</span> 一键Qwen审查
+                        </button>
                         <button class="btn btn-primary" onclick="copyRuleReviewPrompt()">
                             <span class="btn-icon">📋</span> 复制Prompt到剪贴板
                         </button>
@@ -179,19 +201,30 @@
                         </button>
                     </div>
 
+                    <!-- Qwen审查过程提示 -->
+                    <div id="qwen-review-progress" style="display: none; margin-top: 20px; padding: 15px; background: #f0f7ff; border-left: 4px solid #667eea; border-radius: 4px;">
+                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                            <span style="font-size: 20px; margin-right: 10px;" id="qwen-progress-icon">⏳</span>
+                            <span id="qwen-progress-text" style="font-weight: bold;">正在调用Qwen进行审查...</span>
+                        </div>
+                        <div style="font-size: 12px; color: #666;">
+                            <p>⏱️ 审查需要15-30秒，请耐心等待...</p>
+                        </div>
+                    </div>
+
                     <!-- 导入ChatGPT审查结果部分 -->
                     <div id="rule-review-import-section" style="margin-top: 30px; padding-top: 30px; border-top: 2px solid #ddd;">
-                        <h3>📥 步骤2: 导入ChatGPT审查结果</h3>
+                        <h3>📥 步骤2: 导入审查结果</h3>
                         <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin-bottom: 15px; border-radius: 4px;">
-                            <strong>💡 提示:</strong> 将ChatGPT返回的JSON审查结果粘贴到下方，系统将自动插入批注并生成文档
+                            <strong>💡 提示:</strong> 支持导入ChatGPT或Qwen返回的JSON审查结果，系统将自动插入批注并生成文档
                         </div>
 
                         <div class="form-group">
-                            <label for="rule-review-response">ChatGPT审查结果JSON:</label>
+                            <label for="rule-review-response">审查结果JSON:</label>
                             <textarea
                                 id="rule-review-response"
                                 rows="12"
-                                placeholder="请将ChatGPT的完整回复粘贴到这里（包括JSON格式的审查结果）..."
+                                placeholder="请将LLM（ChatGPT或Qwen）的完整回复粘贴到这里（包括JSON格式的审查结果）..."
                                 style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 12px;"
                             ></textarea>
                             <div style="font-size: 12px; color: #666; margin-top: 8px;">
@@ -668,6 +701,7 @@
                         <li>版本: 1.0.0</li>
                         <li>最大文件: 50MB</li>
                         <li>支持格式: .docx, .doc</li>
+    <script src="/js/stance.js"></script>
                     </ul>
                 </div>
                 <div class="info-card">
@@ -687,5 +721,6 @@
     <div id="toast" class="toast"></div>
 
     <script src="/js/main.js"></script>
+    <script src="/js/qwen-review.js"></script>
 </body>
 </html>

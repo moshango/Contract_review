@@ -42,11 +42,23 @@ public class Clause {
     private List<Map<String, List<String>>> tables;
 
     /**
-     * 锚点ID,用于精确定位批注位置
+     * 锚点ID,用于精确定位批注位置（主锚点，指向条款标题）
      * 格式: "anc-{clauseId}-{shortHash}"
      * 如: "anc-c1-4f21"
      */
     private String anchorId;
+
+    /**
+     * 【新增】段落级别的锚点列表
+     *
+     * 为该条款的每个段落生成唯一的anchorId，包括：
+     * - 标题段落
+     * - 内容段落
+     * - 所有子段落
+     *
+     * 这样ChatGPT可以精确指定是哪个段落的内容
+     */
+    private List<ParagraphAnchor> paragraphAnchors;
 
     /**
      * 条款在文档中的起始段落索引

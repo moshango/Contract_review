@@ -69,12 +69,16 @@ public class PreciseTextAnnotationLocator {
 
         String completeText = fullText.toString();
         logger.debug("段落完整文本长度: {}, 内容: {}", completeText.length(), completeText);
+        logger.debug("【文字匹配】寻找: '{}' (长度: {}, 模式: {})", targetText, targetText.length(), matchPattern);
 
         // 查找所有匹配位置
         List<Integer> positions = findMatches(completeText, targetText, matchPattern);
 
         if (positions.isEmpty()) {
             logger.warn("未找到匹配文字: {} (模式: {})", targetText, matchPattern);
+            logger.warn("  已尝试：直接匹配 + 规范化匹配");
+            logger.debug("  段落文本: '{}'", completeText);
+            logger.debug("  目标文本: '{}'", targetText);
             return null;
         }
 
@@ -96,6 +100,7 @@ public class PreciseTextAnnotationLocator {
 
     /**
      * 查找所有匹配位置
+     * 支持智能文本规范化，处理空格、引号、全宽/半宽字符等差异
      *
      * @param text 要搜索的完整文本
      * @param pattern 查找模式
@@ -106,13 +111,48 @@ public class PreciseTextAnnotationLocator {
         List<Integer> positions = new ArrayList<>();
 
         if ("EXACT".equalsIgnoreCase(matchType)) {
-            // 精确匹配
+            // 首先尝试直接精确匹配（原始文本）
             int index = 0;
             while ((index = text.indexOf(pattern, index)) != -1) {
                 positions.add(index);
                 index += pattern.length();
             }
-            logger.debug("精确匹配: 找到 {} 个位置", positions.size());
+
+            // 如果直接匹配失败，尝试规范化后的匹配
+            if (positions.isEmpty()) {
+                logger.debug("直接精确匹配失败，尝试规范化匹配...");
+                String normalizedText = normalizeText(text);
+                String normalizedPattern = normalizeText(pattern);
+
+                logger.debug("  原始pattern: '{}' (长度: {})", pattern, pattern.length());
+                logger.debug("  规范化后: '{}' (长度: {})", normalizedPattern, normalizedPattern.length());
+
+                // 构建映射关系：规范化文本中的位置 -> 原始文本中的位置
+                List<Integer> normalizedMatches = new ArrayList<>();
+                index = 0;
+                while ((index = normalizedText.indexOf(normalizedPattern, index)) != -1) {
+                    normalizedMatches.add(index);
+                    index += normalizedPattern.length();
+                }
+
+                // 将规范化的位置映射回原始文本位置
+                if (!normalizedMatches.isEmpty()) {
+                    logger.debug("  规范化匹配找到 {} 个位置，映射到原始文本...", normalizedMatches.size());
+                    for (Integer normalizedPos : normalizedMatches) {
+                        // 将规范化位置映射回原始文本
+                        int originalPos = mapNormalizedPositionToOriginal(text, normalizedPos);
+                        if (originalPos >= 0) {
+                            positions.add(originalPos);
+                            logger.debug("    规范化位置 {} -> 原始位置 {}", normalizedPos, originalPos);
+                        }
+                    }
+                }
+            }
+
+            logger.debug("精确匹配: 找到 {} 个位置 (直接匹配: {}, 规范化匹配: {})",
+                        positions.size(),
+                        positions.isEmpty() ? "0" : "✓",
+                        positions.isEmpty() ? "✓" : "无需");
 
         } else if ("CONTAINS".equalsIgnoreCase(matchType)) {
             // 包含匹配（允许重叠）
@@ -121,6 +161,23 @@ public class PreciseTextAnnotationLocator {
                 positions.add(index);
                 index += 1;  // 每次只前进1个字符，允许重叠
             }
+
+            // 规范化后的包含匹配
+            if (positions.isEmpty()) {
+                logger.debug("包含匹配：尝试规范化匹配...");
+                String normalizedText = normalizeText(text);
+                String normalizedPattern = normalizeText(pattern);
+
+                index = 0;
+                while ((index = normalizedText.indexOf(normalizedPattern, index)) != -1) {
+                    int originalPos = mapNormalizedPositionToOriginal(text, index);
+                    if (originalPos >= 0) {
+                        positions.add(originalPos);
+                    }
+                    index += 1;
+                }
+            }
+
             logger.debug("包含匹配: 找到 {} 个位置", positions.size());
 
         } else if ("REGEX".equalsIgnoreCase(matchType)) {
@@ -138,6 +195,79 @@ public class PreciseTextAnnotationLocator {
         }
 
         return positions;
+    }
+
+    /**
+     * 规范化文本以提高匹配成功率
+     * - 统一全宽和半宽字符
+     * - 统一引号样式
+     * - 规范化空白字符
+     * - 移除不可见字符
+     *
+     * @param text 原始文本
+     * @return 规范化后的文本
+     */
+    private String normalizeText(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+
+        // 1. 全宽字符转半宽（除了中文）
+        text = text
+            .replace("（", "(")
+            .replace("）", ")")
+            .replace("：", ":")
+            .replace("；", ";")
+            .replace("，", ",")
+            .replace("。", ".")
+            .replace("！", "!")
+            .replace("？", "?")
+            .replace("／", "/")
+            .replace("～", "~")
+            .replace("　", " ");  // 全宽空格转半宽空格
+
+        // 2. 统一引号样式（curly quotes -> straight quotes）
+        text = text
+            .replace("\u201c", "\"")  // left double quotation mark
+            .replace("\u201d", "\"")  // right double quotation mark
+            .replace("\u2018", "'")   // left single quotation mark
+            .replace("\u2019", "'")   // right single quotation mark
+            .replace("«", "\"")
+            .replace("»", "\"");
+
+        // 3. 规范化连续空白（多个空白字符变为一个空格）
+        text = text.replaceAll("\\s+", " ");
+
+        // 4. 移除首尾空白
+        text = text.trim();
+
+        return text;
+    }
+
+    /**
+     * 将规范化文本中的位置映射回原始文本中的位置
+     *
+     * @param originalText 原始文本
+     * @param normalizedPos 规范化文本中的位置
+     * @return 对应的原始文本位置，未找到返回-1
+     */
+    private int mapNormalizedPositionToOriginal(String originalText, int normalizedPos) {
+        String normalizedText = normalizeText(originalText);
+
+        int originalIdx = 0;
+        int normalizedIdx = 0;
+
+        while (originalIdx < originalText.length() && normalizedIdx < normalizedPos) {
+            char originalChar = originalText.charAt(originalIdx);
+            String normalized = normalizeText(String.valueOf(originalChar));
+
+            if (!normalized.isEmpty()) {
+                normalizedIdx++;
+            }
+            originalIdx++;
+        }
+
+        return originalIdx;
     }
 
     /**

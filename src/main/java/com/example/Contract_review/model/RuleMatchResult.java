@@ -24,6 +24,32 @@ public class RuleMatchResult {
     private String clauseId;
 
     /**
+     * 锚点ID（支持两个级别，通过格式自动识别）
+     *
+     * 【关键】这个字段会被包含在生成的Prompt中，用于告知ChatGPT返回的anchorId格式
+     *
+     * 支持格式：
+     * - 条款级: "anc-c1-4f21" (anc-{clauseId}-{hash})
+     * - 段落级: "anc-c1-p2-9f4b" (anc-{clauseId}-p{paraNum}-{hash})
+     *
+     * 系统会自动通过格式中是否含有 "-pX-" 来判断级别
+     */
+    private String anchorId;
+
+    /**
+     * 【新增】段落级别的锚点列表
+     *
+     * 包含该条款所有段落的锚点信息，ChatGPT需要根据targetText所在的段落
+     * 返回对应的anchorId
+     *
+     * 例如对于跨3个段落的条款：
+     *   - paragraphAnchors[0] -> 标题段落（anc-c1-p1-xxx）+ 文本
+     *   - paragraphAnchors[1] -> 第二段（anc-c1-p2-yyy）+ 文本
+     *   - paragraphAnchors[2] -> 第三段（anc-c1-p3-zzz）+ 文本
+     */
+    private List<ParagraphAnchor> paragraphAnchors;
+
+    /**
      * 条款标题
      */
     private String clauseHeading;

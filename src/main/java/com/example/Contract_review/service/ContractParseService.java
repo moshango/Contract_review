@@ -127,48 +127,58 @@ public class ContractParseService {
         byte[] fileBytes = file.getBytes();
         XWPFDocument doc = docxUtils.loadDocx(new ByteArrayInputStream(fileBytes));
 
-        // 【修复】使用真实段落索引方法（解决虚拟索引混乱问题）
-        List<Clause> clauses = docxUtils.extractClausesWithCorrectIndex(doc, generateAnchors);
+        try {
+            // 【修复】使用真实段落索引方法（解决虚拟索引混乱问题）
+            List<Clause> clauses = docxUtils.extractClausesWithCorrectIndex(doc, generateAnchors);
 
-        // 如果需要生成锚点,插入到文档中
-        if (generateAnchors) {
-            logger.info("【工作流】开始插入锚点到文档中");
-            docxUtils.insertAnchors(doc, clauses);
-            logger.info("【工作流】锚点插入完成");
+            // 如果需要生成锚点,插入到文档中
+            if (generateAnchors) {
+                logger.info("【工作流】开始插入锚点到文档中");
+                docxUtils.insertAnchors(doc, clauses);
+                logger.info("【工作流】锚点插入完成");
+            }
+
+            // 提取其他信息
+            String title = docxUtils.extractTitle(doc);
+            int wordCount = docxUtils.countWords(doc);
+            int paragraphCount = docxUtils.countParagraphs(doc);
+
+            // 构建元数据
+            Map<String, Object> meta = new HashMap<>();
+            meta.put("wordCount", wordCount);
+            meta.put("paragraphCount", paragraphCount);
+
+            ParseResult parseResult = ParseResult.builder()
+                    .filename(filename)
+                    .title(title)
+                    .clauses(clauses)
+                    .meta(meta)
+                    .build();
+
+            // 生成文档字节数组
+            byte[] documentBytes = null;
+            if (generateAnchors) {
+                logger.info("【工作流】开始将修改的文档保存为字节数组");
+                documentBytes = docxUtils.writeToBytes(doc);
+                logger.info("【工作流】文档字节数组生成完成: 大小={} 字节",
+                           documentBytes != null ? documentBytes.length : 0);
+            } else {
+                logger.info("【工作流】未启用锚点生成，documentBytes=null");
+            }
+
+            logger.info("解析完成并生成带锚点文档: title={}, clauses={}, documentBytes大小={}",
+                       title, clauses.size(), documentBytes != null ? documentBytes.length : 0);
+
+            return new ParseResultWithDocument(parseResult, documentBytes);
+        } finally {
+            // 【关键】确保关闭文档，释放资源
+            try {
+                doc.close();
+                logger.debug("【资源管理】XWPFDocument已关闭");
+            } catch (IOException e) {
+                logger.warn("【资源管理】关闭XWPFDocument时出错", e);
+            }
         }
-
-        // 提取其他信息
-        String title = docxUtils.extractTitle(doc);
-        int wordCount = docxUtils.countWords(doc);
-        int paragraphCount = docxUtils.countParagraphs(doc);
-
-        // 构建元数据
-        Map<String, Object> meta = new HashMap<>();
-        meta.put("wordCount", wordCount);
-        meta.put("paragraphCount", paragraphCount);
-
-        ParseResult parseResult = ParseResult.builder()
-                .filename(filename)
-                .title(title)
-                .clauses(clauses)
-                .meta(meta)
-                .build();
-
-        // 生成文档字节数组
-        byte[] documentBytes = null;
-        if (generateAnchors) {
-            logger.info("【工作流】开始将修改的文档保存为字节数组");
-            documentBytes = docxUtils.writeToBytes(doc);
-            logger.info("【工作流】文档字节数组生成完成: 大小={} 字节",
-                       documentBytes != null ? documentBytes.length : 0);
-        } else {
-            logger.info("【工作流】未启用锚点生成，documentBytes=null");
-        }
-
-        logger.info("解析完成并生成带锚点文档: title={}, clauses={}, documentBytes大小={}",
-                   title, clauses.size(), documentBytes != null ? documentBytes.length : 0);
-
-        return new ParseResultWithDocument(parseResult, documentBytes);
     }
 
     /**

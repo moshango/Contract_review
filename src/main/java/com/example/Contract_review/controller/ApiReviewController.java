@@ -4,9 +4,13 @@ import com.example.Contract_review.model.ParseResult;
 import com.example.Contract_review.model.ReviewRule;
 import com.example.Contract_review.model.RuleMatchResult;
 import com.example.Contract_review.model.Clause;
+import com.example.Contract_review.model.ReviewStance;
 import com.example.Contract_review.service.ContractParseService;
 import com.example.Contract_review.service.ReviewRulesService;
+import com.example.Contract_review.service.ParseResultCache;
+import com.example.Contract_review.service.ReviewStanceService;
 import com.example.Contract_review.util.PromptGenerator;
+import com.example.Contract_review.util.PromptGeneratorNew;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -41,6 +45,12 @@ public class ApiReviewController {
     private ReviewRulesService reviewRulesService;
 
     @Autowired
+    private ParseResultCache parseResultCache;
+
+    @Autowired
+    private ReviewStanceService reviewStanceService;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     /**
@@ -54,25 +64,43 @@ public class ApiReviewController {
      *
      * @param file 合同文件（.docx / .doc）
      * @param contractType 合同类型（采购/外包/NDA/通用合同等）
+     * @param party 审查立场（"A" 甲方 / "B" 乙方 / 不指定则为中立）
      * @return JSON 结果，包含 prompt、匹配结果、风险统计等
      */
     @PostMapping("/analyze")
     public ResponseEntity<?> analyzeContract(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "contractType", defaultValue = "通用合同") String contractType) {
+            @RequestParam(value = "contractType", defaultValue = "通用合同") String contractType,
+            @RequestParam(value = "party", required = false) String party) {
 
         long startTime = System.currentTimeMillis();
         String filename = file.getOriginalFilename();
 
         try {
             logger.info("=== 开始合同审查分析 ===");
-            logger.info("文件: {}, 类型: {}", filename, contractType);
+            logger.info("文件: {}, 类型: {}, 立场: {}", filename, contractType, party != null ? party : "中立");
+
+            // 【新增】设置用户立场
+            if (party != null && !party.trim().isEmpty()) {
+                reviewStanceService.setStanceByParty(party);
+                logger.info("✓ 已设置审查立场: {}", party);
+            }
 
             // 步骤1: 解析合同（生成锚点供后续批注使用）
-            logger.info("步骤1: 解析合同...");
-            ParseResult parseResult = contractParseService.parseContract(file, "generate");
+            logger.info("步骤1: 解析合同并生成带锚点文档...");
+            ContractParseService.ParseResultWithDocument parseResultWithDoc = contractParseService.parseContractWithDocument(file, "generate");
+            ParseResult parseResult = parseResultWithDoc.getParseResult();
             List<Clause> clauses = parseResult.getClauses();
-            logger.info("✓ 解析完成，共 {} 个条款，锚点已生成", clauses.size());
+            byte[] anchoredDocumentBytes = parseResultWithDoc.getDocumentBytes();
+            logger.info("✓ 解析完成，共 {} 个条款，锚点已生成，带锚点文档大小: {} 字节",
+                       clauses.size(), anchoredDocumentBytes != null ? anchoredDocumentBytes.length : 0);
+
+            // 【新增】保存到缓存并生成 parseResultId
+            String parseResultId = null;
+            if (anchoredDocumentBytes != null && anchoredDocumentBytes.length > 0) {
+                parseResultId = parseResultCache.store(parseResult, anchoredDocumentBytes, filename);
+                logger.info("✓ 带锚点文档已保存到缓存，parseResultId: {}", parseResultId);
+            }
 
             // 步骤2: 加载和过滤规则
             logger.info("步骤2: 加载审查规则...");
@@ -85,9 +113,14 @@ public class ApiReviewController {
             logger.info("步骤3: 匹配条款与规则...");
             List<RuleMatchResult> matchResults = new ArrayList<>();
 
+            // 【新增】获取用户立场
+            ReviewStance stance = reviewStanceService.getStance();
+
             for (Clause clause : clauses) {
                 List<ReviewRule> matchedRules = applicableRules.stream()
                     .filter(rule -> rule.matches(clause.getFullText()))
+                    // 【新增】根据用户立场过滤规则
+                    .filter(rule -> stance.isRuleApplicable(rule))
                     .collect(Collectors.toList());
 
                 if (!matchedRules.isEmpty()) {
@@ -96,6 +129,8 @@ public class ApiReviewController {
 
                     RuleMatchResult result = RuleMatchResult.builder()
                         .clauseId(clause.getId())
+                        .anchorId(clause.getAnchorId())  // 【关键修复】从解析的条款中获取 anchorId
+                        .paragraphAnchors(clause.getParagraphAnchors())  // 【新增】传递段落级锚点，用于Prompt显示
                         .clauseHeading(clause.getHeading())
                         .clauseText(clause.getFullText())
                         .matchedRules(matchedRules)
@@ -104,15 +139,17 @@ public class ApiReviewController {
                         .build();
 
                     matchResults.add(result);
-                    logger.debug("条款 {} 匹配 {} 条规则", clause.getId(), matchedRules.size());
+                    logger.debug("条款 {} 匹配 {} 条规则，anchorId: {}, 段落数: {}, 用户立场: {}",
+                               clause.getId(), matchedRules.size(), clause.getAnchorId(),
+                               clause.getParagraphAnchors() != null ? clause.getParagraphAnchors().size() : 0,
+                               stance.getDescription());
                 }
             }
 
             logger.info("✓ 匹配完成，检出 {} 个需要审查的条款", matchResults.size());
 
-            // 步骤4: 生成 Prompt
-            logger.info("步骤4: 生成 LLM Prompt...");
-            String prompt = PromptGenerator.generateFullPrompt(matchResults, contractType);
+            // 步骤4: 生成 Prompt（【关键】现在支持立场相关的建议）
+            String prompt = PromptGeneratorNew.generateFullPrompt(matchResults, contractType, stance);
             logger.info("✓ Prompt 生成完成，长度: {} 字符", prompt.length());
 
             // 步骤5: 生成审查指导和统计信息
@@ -123,6 +160,9 @@ public class ApiReviewController {
             response.put("success", true);
             response.put("filename", filename);
             response.put("contractType", contractType);
+            // 【新增】添加用户审查立场
+            response.put("userStance", stance.getParty() != null ? stance.getParty() : "Neutral");
+            response.put("stanceDescription", stance.getDescription());
             response.put("timestamp", System.currentTimeMillis());
 
             // 统计信息
@@ -142,15 +182,15 @@ public class ApiReviewController {
             // 审查指导
             response.set("guidance", guidance);
 
-            // Prompt 提示
+            // 【关键】添加 Prompt 到响应，供前端复制到 LLM 使用
             response.put("prompt", prompt);
-            response.put("promptLength", prompt.length());
 
             // 匹配结果详情（用于前端展示）
             ArrayNode matchResultsArray = response.putArray("matchResults");
             for (RuleMatchResult result : matchResults) {
                 ObjectNode resultNode = objectMapper.createObjectNode();
                 resultNode.put("clauseId", result.getClauseId());
+                resultNode.put("anchorId", result.getAnchorId());  // 【关键】添加 anchorId 到响应
                 resultNode.put("heading", result.getClauseHeading());
                 resultNode.put("riskLevel", result.getHighestRisk());
                 resultNode.put("matchedRuleCount", result.getMatchCount());
@@ -169,9 +209,16 @@ public class ApiReviewController {
                 matchResultsArray.add(resultNode);
             }
 
-            // 工作流提示
-            response.put("nextStep", "将 prompt 字段的内容复制到 LLM（ChatGPT、Claude等），" +
-                "LLM 将返回 JSON 格式的审查结果，然后可以调用 /annotate 接口插入批注");
+            // 【关键修复】包含 parseResultId 供后续批注使用
+            if (parseResultId != null && !parseResultId.isEmpty()) {
+                response.put("parseResultId", parseResultId);
+                response.put("nextStep", "将 prompt 字段的内容复制到 LLM（ChatGPT、Claude等），" +
+                    "LLM 将返回 JSON 格式的审查结果，然后可以调用 /chatgpt/import-result?parseResultId=" + parseResultId + " 接口导入结果");
+                logger.info("✓ parseResultId 已添加到响应: {}", parseResultId);
+            } else {
+                response.put("nextStep", "将 prompt 字段的内容复制到 LLM（ChatGPT、Claude等），" +
+                    "LLM 将返回 JSON 格式的审查结果，然后可以调用 /api/annotate 接口插入批注");
+            }
 
             long endTime = System.currentTimeMillis();
             response.put("processingTime", endTime - startTime + "ms");
@@ -300,9 +347,110 @@ public class ApiReviewController {
         endpoints.put("analyze", "POST /api/review/analyze");
         endpoints.put("rules", "GET /api/review/rules");
         endpoints.put("reloadRules", "POST /api/review/reload-rules");
+        endpoints.put("settings", "POST /api/review/settings (设置立场)");
         endpoints.put("status", "GET /api/review/status");
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 审查设置接口 - 配置用户的审查立场
+     *
+     * 【新增】用户可选择自己的立场（甲方或乙方），
+     * 在规则匹配时会根据立场返回对应的建议
+     *
+     * @param party 审查立场 ("A" 甲方 / "B" 乙方 / 其他或空为中立)
+     * @return 当前设置信息
+     */
+    @PostMapping("/settings")
+    public ResponseEntity<?> setReviewSettings(
+            @RequestParam(value = "party", required = false) String party) {
+
+        try {
+            logger.info("=== 设置审查立场 ===");
+
+            // 设置立场
+            if (party != null && !party.trim().isEmpty()) {
+                if (!("A".equalsIgnoreCase(party) || "B".equalsIgnoreCase(party))) {
+                    // 无效的立场，返回错误
+                    ObjectNode error = objectMapper.createObjectNode();
+                    error.put("success", false);
+                    error.put("error", "无效的立场值。应为 'A'（甲方）或 'B'（乙方）");
+                    ArrayNode validValues = error.putArray("validValues");
+                    validValues.add("A");
+                    validValues.add("B");
+                    validValues.add("Neutral");
+                    return ResponseEntity.badRequest().body(error);
+                }
+                reviewStanceService.setStanceByParty(party);
+                logger.info("✓ 审查立场已设置为: {}", party.toUpperCase());
+            } else {
+                // 清除立场设置，恢复为中立
+                reviewStanceService.setStance(ReviewStance.neutral());
+                logger.info("✓ 审查立场已重置为中立");
+            }
+
+            // 获取当前立场
+            ReviewStance currentStance = reviewStanceService.getStance();
+
+            // 构建响应
+            ObjectNode response = objectMapper.createObjectNode();
+            response.put("success", true);
+            response.put("currentStance", currentStance.getParty() != null ? currentStance.getParty() : "Neutral");
+            response.put("stanceDescription", currentStance.getDescription());
+            response.put("timestamp", System.currentTimeMillis());
+
+            ObjectNode info = response.putObject("stanceInfo");
+            info.put("A", "甲方立场 - 将收到对甲方有利的建议");
+            info.put("B", "乙方立场 - 将收到对乙方有利的建议");
+            info.put("Neutral", "中立立场 - 只显示通用的中立建议");
+
+            response.put("nextStep", "下次调用 /api/review/analyze 时，系统将使用此立场进行规则匹配");
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("设置审查立场失败", e);
+            ObjectNode error = objectMapper.createObjectNode();
+            error.put("success", false);
+            error.put("error", "设置失败: " + e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * 获取当前审查设置
+     *
+     * @return 当前的审查立场和设置信息
+     */
+    @GetMapping("/settings")
+    public ResponseEntity<?> getReviewSettings() {
+
+        try {
+            ReviewStance currentStance = reviewStanceService.getStance();
+
+            ObjectNode response = objectMapper.createObjectNode();
+            response.put("success", true);
+            response.put("currentStance", currentStance.getParty() != null ? currentStance.getParty() : "Neutral");
+            response.put("stanceDescription", currentStance.getDescription());
+            response.put("timestamp", System.currentTimeMillis());
+
+            ObjectNode availableOptions = response.putObject("availableOptions");
+            availableOptions.put("A", "甲方立场");
+            availableOptions.put("B", "乙方立场");
+            availableOptions.put("Neutral", "中立立场");
+
+            response.put("info", "可使用 POST /api/review/settings?party=A 或 party=B 来切换立场");
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("获取审查设置失败", e);
+            ObjectNode error = objectMapper.createObjectNode();
+            error.put("success", false);
+            error.put("error", "获取失败: " + e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
     }
 
     /**

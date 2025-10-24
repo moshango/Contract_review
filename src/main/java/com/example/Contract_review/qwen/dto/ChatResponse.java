@@ -42,4 +42,13 @@ public class ChatResponse {
         @JsonProperty("output_tokens")
         private int outputTokens;
     }
+
+    /**
+     * 提取响应内容
+     * @return 响应内容，如果为 null 则返回空字符串
+     */
+    public String extractContent() {
+        return content != null ? content : "";
+    }
 }
+

@@ -2,6 +2,7 @@ package com.example.Contract_review.util;
 
 import com.example.Contract_review.model.RuleMatchResult;
 import com.example.Contract_review.model.ReviewRule;
+import com.example.Contract_review.model.ReviewStance;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -12,27 +13,27 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 
 /**
- * Prompt 生成工具
+ * Prompt 生成工具 - 支持立场相关的建议
  *
  * 根据规则匹配结果为 LLM 生成审查 prompt
  * 格式化包含 checklist、条款文本、建议等信息
+ *
+ * 【新增】支持根据用户立场生成针对性的建议
  */
-public class PromptGenerator {
+public class PromptGeneratorNew {
 
-    private static final Logger logger = LoggerFactory.getLogger(PromptGenerator.class);
+    private static final Logger logger = LoggerFactory.getLogger(PromptGeneratorNew.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
-     * 为单个条款生成审查 prompt
+     * 为单个条款生成审查 prompt - 支持立场相关建议
      * 包含规则匹配信息、检查清单、锚点信息和建议
      *
-     * 【关键改进】显示条款的所有段落及其对应的锚点ID，
-     * 使ChatGPT能够指定发现问题的具体段落或整个条款
-     *
      * @param result 规则匹配结果
+     * @param stance 用户立场（用于返回对应的建议）
      * @return Prompt 文本
      */
-    public static String generateClausePrompt(RuleMatchResult result) {
+    public static String generateClausePrompt(RuleMatchResult result, ReviewStance stance) {
         if (result == null || result.getMatchedRules().isEmpty()) {
             return "";
         }
@@ -47,7 +48,7 @@ public class PromptGenerator {
         }
         prompt.append("\n\n");
 
-        // 【关键改进】显示所有段落及其对应的锚点ID
+        // 显示所有段落及其对应的锚点ID
         prompt.append("【原文】\n");
 
         if (result.getParagraphAnchors() != null && !result.getParagraphAnchors().isEmpty()) {
@@ -78,10 +79,17 @@ public class PromptGenerator {
                     prompt.append("  ").append(line).append("\n");
                 }
             }
+
+            // 【新增】添加针对立场的建议
+            String suggestion = getSuggestionForStance(rule, stance);
+            if (suggestion != null && !suggestion.isEmpty()) {
+                prompt.append("  【立场建议】").append(suggestion).append("\n");
+            }
+
             prompt.append("\n");
         }
 
-        // 【关键优化】明确指示 anchorId 的两个级别和用途
+        // 审查要求
         prompt.append("【审查要求】\n");
         prompt.append("1. 根据上述检查要点对该条款进行审查\n");
         prompt.append("2. 如果发现问题，请从【原文】部分精确摘取需要修改的文字作为 targetText\n");
@@ -100,13 +108,14 @@ public class PromptGenerator {
     }
 
     /**
-     * 为多个条款生成完整的审查 prompt
+     * 为多个条款生成完整的审查 prompt - 支持立场相关建议
      *
      * @param results 多个规则匹配结果
      * @param contractType 合同类型
+     * @param stance 用户立场
      * @return 完整 Prompt 文本
      */
-    public static String generateFullPrompt(List<RuleMatchResult> results, String contractType) {
+    public static String generateFullPrompt(List<RuleMatchResult> results, String contractType, ReviewStance stance) {
         if (results == null || results.isEmpty()) {
             return "未检出需要审查的条款";
         }
@@ -117,7 +126,29 @@ public class PromptGenerator {
 
         fullPrompt.append("【合同信息】\n");
         fullPrompt.append("合同类型: ").append(contractType != null ? contractType : "通用合同").append("\n");
+        fullPrompt.append("审查立场: ").append(stance != null ? stance.getDescription() : "中立").append("\n");
         fullPrompt.append("需要审查的条款数: ").append(results.size()).append("\n\n");
+
+        // 【新增】立场相关的审查指导
+        if (stance != null && stance.getParty() != null) {
+            fullPrompt.append("【立场审查指导】\n");
+            fullPrompt.append("您正在代表「").append(stance.getDescription()).append("」进行合同审查。\n");
+
+            if ("A".equalsIgnoreCase(stance.getParty())) {
+                fullPrompt.append("请重点关注对甲方不利的条款，提出对甲方有利的修改建议。\n");
+                fullPrompt.append("特别注意：\n");
+                fullPrompt.append("- 那些可能增加甲方成本或责任的条款\n");
+                fullPrompt.append("- 那些限制甲方权利或灵活性的条款\n");
+                fullPrompt.append("- 那些对甲方不公平或风险较大的条款\n");
+            } else if ("B".equalsIgnoreCase(stance.getParty())) {
+                fullPrompt.append("请重点关注如何保护乙方的利益，提出对乙方有利的修改建议。\n");
+                fullPrompt.append("特别注意：\n");
+                fullPrompt.append("- 那些可能增加乙方责任或风险的条款\n");
+                fullPrompt.append("- 那些对乙方不公平的付款或交付条件\n");
+                fullPrompt.append("- 那些限制乙方灵活性或权利的条款\n");
+            }
+            fullPrompt.append("\n");
+        }
 
         fullPrompt.append("【审查规则说明】\n");
         fullPrompt.append("系统已通过关键字和规则识别出以下可能存在风险的条款。")
@@ -150,7 +181,7 @@ public class PromptGenerator {
         // 条款详细信息
         fullPrompt.append("【需要审查的条款列表】\n");
         for (RuleMatchResult result : results) {
-            fullPrompt.append(generateClausePrompt(result)).append("\n");
+            fullPrompt.append(generateClausePrompt(result, stance)).append("\n");
             fullPrompt.append("---\n\n");
         }
 
@@ -162,11 +193,28 @@ public class PromptGenerator {
     }
 
     /**
-     * 生成期望的 JSON 输出格式说明
+     * 根据立场获取针对性的建议
      *
-     * 【关键改进】使用统一的 anchorId 字段，通过格式自动识别是条款级还是段落级
-     * - 段落级锚点格式: anc-c{X}-p{Y}-{hash} (推荐使用)
-     * - 条款级锚点格式: anc-c{X}-{hash} (当问题涉及整个条款时使用)
+     * @param rule 审查规则
+     * @param stance 用户立场
+     * @return 针对立场的建议
+     */
+    private static String getSuggestionForStance(ReviewRule rule, ReviewStance stance) {
+        if (stance == null || stance.getParty() == null) {
+            return ""; // 中立立场不需要特殊建议
+        }
+
+        if ("A".equalsIgnoreCase(stance.getParty())) {
+            return rule.getSuggestA() != null ? rule.getSuggestA() : "";
+        } else if ("B".equalsIgnoreCase(stance.getParty())) {
+            return rule.getSuggestB() != null ? rule.getSuggestB() : "";
+        }
+
+        return "";
+    }
+
+    /**
+     * 生成期望的 JSON 输出格式说明
      *
      * @return JSON 格式示例
      */
@@ -177,7 +225,7 @@ public class PromptGenerator {
         ArrayNode issues = mapper.createArrayNode();
         ObjectNode issue1 = mapper.createObjectNode();
         issue1.put("clauseId", "c1");
-        issue1.put("anchorId", "anc-c1-p2-8f3a");  // 【关键】段落级锚点格式，指定具体段落
+        issue1.put("anchorId", "anc-c1-p2-8f3a");  // 段落级锚点格式，指定具体段落
         issue1.put("severity", "HIGH");
         issue1.put("category", "付款条款");
         issue1.put("finding", "付款周期不明确，容易产生争议");

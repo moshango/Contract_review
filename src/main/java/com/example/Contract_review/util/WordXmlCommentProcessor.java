@@ -290,6 +290,47 @@ public class WordXmlCommentProcessor {
                         issue.getMatchIndex() != null ? issue.getMatchIndex() : 1
                 );
 
+                // 【新增】如果在锚点段落找不到，尝试在后续段落中搜索
+                // 这是为了处理多段落条款的情况（条款标题和条款内容在不同段落）
+                if (matchResult == null) {
+                    logger.debug("在锚点段落中未找到 targetText，尝试在后续段落中搜索（处理多段落条款）");
+
+                    Element documentElement = documentXml.getRootElement();
+                    Element body = documentElement.element(QName.get("body", W_NS));
+                    List<Element> allParagraphs = findAllParagraphsRecursive(body);
+
+                    // 找到当前段落在所有段落中的索引
+                    int currentParaIndex = -1;
+                    for (int i = 0; i < allParagraphs.size(); i++) {
+                        if (allParagraphs.get(i) == targetParagraph) {
+                            currentParaIndex = i;
+                            break;
+                        }
+                    }
+
+                    if (currentParaIndex >= 0) {
+                        // 在后续的 10 个段落内搜索（避免跨越到下一个条款）
+                        for (int i = currentParaIndex + 1; i < Math.min(currentParaIndex + 11, allParagraphs.size()); i++) {
+                            Element nextPara = allParagraphs.get(i);
+                            matchResult = preciseLocator.findTextInParagraph(
+                                    nextPara,
+                                    issue.getTargetText(),
+                                    issue.getMatchPattern() != null ? issue.getMatchPattern() : "EXACT",
+                                    issue.getMatchIndex() != null ? issue.getMatchIndex() : 1
+                            );
+
+                            if (matchResult != null) {
+                                logger.info("【多段落条款】在后续段落 {} 中找到 targetText，从段落 {} 迁移到段落 {}",
+                                           i, currentParaIndex, i);
+                                targetParagraph = nextPara;  // 更新目标段落
+                                startRun = matchResult.getStartRun();
+                                endRun = matchResult.getEndRun();
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 if (matchResult != null) {
                     startRun = matchResult.getStartRun();
                     endRun = matchResult.getEndRun();
@@ -306,7 +347,7 @@ public class WordXmlCommentProcessor {
                                    issue.getTargetText());
                     }
                 } else {
-                    logger.warn("精确文字匹配失败，降级到段落级别批注：targetText={}, matchPattern={}, matchIndex={}",
+                    logger.warn("精确文字匹配失败（包括多段落搜索），降级到段落级别批注：targetText={}, matchPattern={}, matchIndex={}",
                                issue.getTargetText(),
                                issue.getMatchPattern() != null ? issue.getMatchPattern() : "EXACT",
                                issue.getMatchIndex() != null ? issue.getMatchIndex() : 1);
@@ -341,6 +382,9 @@ public class WordXmlCommentProcessor {
     /**
      * 在document.xml中查找目标段落
      * 支持三种策略进行多级回退定位
+     * 【新版本】anchorId自动级别检测：通过格式判断是条款级还是段落级
+     * - 条款级格式: anc-c1-4f21 (不含 -pX-)
+     * - 段落级格式: anc-c1-p2-9f4b (含 -pX-)
      * 新版本：支持表格内段落的递归查找
      */
     private Element findTargetParagraph(Document documentXml, ReviewIssue issue, String anchorStrategy) {
@@ -350,17 +394,36 @@ public class WordXmlCommentProcessor {
         // 使用递归方式获取所有段落（包括表格内的段落）
         List<Element> allParagraphs = findAllParagraphsRecursive(body);
 
+        String anchorId = issue.getAnchorId();
         logger.info("开始查找目标段落：clauseId={}, anchorId={}, 策略={}, 总段落数={} (包含表格内段落)",
-                   issue.getClauseId(), issue.getAnchorId(), anchorStrategy, allParagraphs.size());
+                   issue.getClauseId(), anchorId, anchorStrategy, allParagraphs.size());
+
+        // 【关键改进】根据anchorId的格式自动判断是段落级还是条款级
+        // 格式说明：
+        // - 段落级：anc-c{X}-p{Y}-{hash}  (含有 -pX- 模式)
+        // - 条款级：anc-c{X}-{hash}       (不含 -pX- 模式)
+        boolean isParagraphLevelAnchor = anchorId != null && anchorId.matches(".*-p\\d+-.*");
+
+        if (isParagraphLevelAnchor) {
+            logger.info("【自动检测】anchorId为段落级格式：{}, 直接定位到该段落（无需多段落搜索）", anchorId);
+            Element found = findParagraphByAnchor(allParagraphs, anchorId);
+            if (found != null) {
+                logger.info("✓ 通过段落级anchorId找到目标段落");
+                return found;
+            }
+            logger.warn("✗ 未找到段落级anchorId对应的段落，回退到策略查找");
+        } else {
+            logger.info("【自动检测】anchorId为条款级格式：{}，使用策略查找", anchorId);
+        }
 
         // 根据策略查找段落
         if ("anchorOnly".equalsIgnoreCase(anchorStrategy)) {
             logger.debug("使用 anchorOnly 策略：仅通过anchorId查找");
-            return findParagraphByAnchor(allParagraphs, issue.getAnchorId());
+            return findParagraphByAnchor(allParagraphs, anchorId);
 
         } else if ("textFallback".equalsIgnoreCase(anchorStrategy)) {
             logger.debug("使用 textFallback 策略：优先anchorId，失败则用文本匹配");
-            Element found = findParagraphByAnchor(allParagraphs, issue.getAnchorId());
+            Element found = findParagraphByAnchor(allParagraphs, anchorId);
             if (found != null) {
                 logger.info("✓ 锚点查找成功");
                 return found;
@@ -372,7 +435,7 @@ public class WordXmlCommentProcessor {
         } else {
             // 默认：preferAnchor - 优先锚点，失败则条款ID文本匹配
             logger.debug("使用 preferAnchor 策略（默认）：优先anchorId，失败则用文本匹配");
-            Element found = findParagraphByAnchor(allParagraphs, issue.getAnchorId());
+            Element found = findParagraphByAnchor(allParagraphs, anchorId);
             if (found != null) {
                 logger.info("✓ 锚点查找成功");
                 return found;

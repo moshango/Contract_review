@@ -17,8 +17,18 @@ import lombok.NoArgsConstructor;
 public class ReviewIssue {
 
     /**
-     * 锚点ID,用于精确定位批注位置
-     * 格式: "anc-{clauseId}-{shortHash}"
+     * 锚点ID，用于精确定位批注位置
+     *
+     * 支持两个级别（通过格式自动识别）：
+     * 1. 条款级：格式 "anc-{clauseId}-{hash}"
+     *    例如: "anc-c1-4f21"
+     *    含义: 指向条款1的主锚点
+     *
+     * 2. 段落级：格式 "anc-{clauseId}-p{paragraphNum}-{hash}"
+     *    例如: "anc-c1-p2-9f4b"
+     *    含义: 指向条款1的第2个段落
+     *
+     * 系统会自动通过格式判断是条款级还是段落级锚点
      */
     private String anchorId;
 

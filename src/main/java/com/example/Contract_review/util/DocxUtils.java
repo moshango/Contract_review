@@ -1,6 +1,7 @@
 package com.example.Contract_review.util;
 
 import com.example.Contract_review.model.Clause;
+import com.example.Contract_review.model.ParagraphAnchor;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.usermodel.Paragraph;
 import org.apache.poi.hwpf.usermodel.Range;
@@ -389,9 +390,20 @@ public class DocxUtils {
 
                 // 生成锚点ID（使用完整的 Clause 对象以确保确定性）
                 if (generateAnchors) {
+                    // 1. 生成主锚点ID（指向条款标题）
                     String anchorId = generateAnchorId(clause);
                     clause.setAnchorId(anchorId);
-                    logger.info("  生成锚点: anchorId={}", anchorId);
+                    logger.info("  生成主锚点: anchorId={}", anchorId);
+
+                    // 2. 【关键】为该条款的所有段落生成独立的anchorId
+                    List<ParagraphAnchor> paragraphAnchors = generateParagraphAnchors(clause, doc);
+                    clause.setParagraphAnchors(paragraphAnchors);
+                    logger.info("  生成段落锚点: 共{}个段落",  paragraphAnchors.size());
+                    for (ParagraphAnchor pa : paragraphAnchors) {
+                        logger.debug("    段落{}: {} ({}...)",
+                                   pa.getParagraphNumber(), pa.getAnchorId(),
+                                   pa.getParagraphText().substring(0, Math.min(30, pa.getParagraphText().length())));
+                    }
                 }
 
                 clauses.add(clause);
@@ -632,6 +644,119 @@ public class DocxUtils {
     }
 
     /**
+     * 【新增】为条款的所有段落生成独立的anchorId列表
+     *
+     * 这个方法为多段落条款中的每个段落生成唯一的anchorId
+     * 格式: anc-{clauseId}-p{paraNum}-{hash}
+     * 例如: anc-c2-p1-8f3a, anc-c2-p2-9f4b, anc-c2-p3-af5c
+     *
+     * @param clause 条款对象（包含 startParaIndex 和 endParaIndex）
+     * @param doc XWPFDocument文档（用于获取段落内容）
+     * @return 段落锚点列表
+     */
+    public List<ParagraphAnchor> generateParagraphAnchors(Clause clause, XWPFDocument doc) {
+        List<ParagraphAnchor> paragraphAnchors = new ArrayList<>();
+        List<XWPFParagraph> allParagraphs = doc.getParagraphs();
+
+        Integer startIndex = clause.getStartParaIndex();
+        Integer endIndex = clause.getEndParaIndex();
+
+        if (startIndex == null || endIndex == null || startIndex > endIndex) {
+            logger.warn("【段落锚点生成】无效的段落索引范围: clauseId={}, start={}, end={}",
+                       clause.getId(), startIndex, endIndex);
+            return paragraphAnchors;
+        }
+
+        logger.debug("【段落锚点生成】为条款生成段落锚点: clauseId={}, 段落范围=[{}-{}]",
+                    clause.getId(), startIndex, endIndex);
+
+        // 为每个段落生成锚点
+        int paragraphNum = 1;
+        for (int paraIndex = startIndex; paraIndex <= endIndex; paraIndex++) {
+            if (paraIndex >= 0 && paraIndex < allParagraphs.size()) {
+                XWPFParagraph para = allParagraphs.get(paraIndex);
+                String paraText = para.getText();
+
+                if (paraText == null || paraText.trim().isEmpty()) {
+                    logger.debug("【段落锚点生成】跳过空段落: paraIndex={}", paraIndex);
+                    continue;
+                }
+
+                // 生成该段落的anchorId
+                String paragraphAnchorId = generateParagraphAnchorId(clause, paragraphNum, paraText);
+
+                // 创建ParagraphAnchor对象
+                ParagraphAnchor pa = ParagraphAnchor.builder()
+                        .paragraphIndex(paraIndex)
+                        .anchorId(paragraphAnchorId)
+                        .paragraphText(paraText)
+                        .paragraphNumber(paragraphNum)
+                        .isTitle(paraIndex == startIndex)  // 第一个非空段落标记为标题
+                        .build();
+
+                paragraphAnchors.add(pa);
+
+                logger.debug("【段落锚点生成】生成段落{}的anchorId: paraIndex={}, anchorId={}, textLen={}",
+                            paragraphNum, paraIndex, paragraphAnchorId, paraText.length());
+
+                paragraphNum++;
+            } else {
+                logger.warn("【段落锚点生成】段落索引超出范围: clauseId={}, paraIndex={}, 总段落数={}",
+                           clause.getId(), paraIndex, allParagraphs.size());
+            }
+        }
+
+        logger.info("【段落锚点生成】完成: clauseId={}, 共生成{}个段落锚点",
+                   clause.getId(), paragraphAnchors.size());
+
+        return paragraphAnchors;
+    }
+
+    /**
+     * 为单个段落生成特定的anchorId
+     *
+     * @param clause 条款对象
+     * @param paragraphNum 段落号（从1开始）
+     * @param paragraphText 段落文本（用于生成稳定的哈希）
+     * @return 段落级别的anchorId
+     */
+    private String generateParagraphAnchorId(Clause clause, int paragraphNum, String paragraphText) {
+        try {
+            String clauseId = clause.getId();
+            String heading = clause.getHeading() != null ? clause.getHeading() : "";
+
+            // 段落级哈希：使用段落号 + 段落内容
+            int contentLen = Math.min(100, paragraphText.length());
+            String content = contentLen > 0 ? paragraphText.substring(0, contentLen) : "";
+
+            // 构造确定性输入：包含段落号以确保不同段落的anchorId不同
+            String hashInput = clauseId + "|p" + paragraphNum + "|" + heading + "|" + content;
+
+            // 使用 SHA-256 产生稳定的哈希
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = md.digest(hashInput.getBytes("UTF-8"));
+
+            // 取前8个十六进制字符（4个字节）
+            StringBuilder hashHex = new StringBuilder();
+            for (int i = 0; i < 4; i++) {
+                hashHex.append(String.format("%02x", hashBytes[i] & 0xFF));
+            }
+
+            // 格式：anc-{clauseId}-p{paragraphNum}-{hash}
+            String anchorId = "anc-" + clauseId + "-p" + paragraphNum + "-" + hashHex.toString();
+            logger.trace("生成段落锚点: clauseId={}, paragraphNum={}, anchorId={}",
+                        clauseId, paragraphNum, anchorId);
+
+            return anchorId;
+        } catch (Exception e) {
+            logger.error("生成段落锚点ID失败: {}", e.getMessage());
+            String clauseId = clause.getId() != null ? clause.getId() : "unknown";
+            // 回退方案
+            return "anc-" + clauseId + "-p" + paragraphNum + "-" + UUID.randomUUID().toString().substring(0, 8);
+        }
+    }
+
+    /**
      * 生成确定性锚点ID - 重载版本（保持向后兼容，调用新方法）
      *
      * @deprecated 已弃用，请使用 {@link #generateAnchorId(Clause)}
@@ -650,6 +775,7 @@ public class DocxUtils {
 
     /**
      * 在文档中插入锚点书签
+     * 【改进】支持插入两层锚点：主锚点（条款级别）+ 段落级锚点（多段落支持）
      *
      * @param doc XWPFDocument对象
      * @param clauses 条款列表
@@ -660,12 +786,14 @@ public class DocxUtils {
 
         int successCount = 0;
         int skipCount = 0;
+        int paragraphAnchorCount = 0;
 
         // 【诊断】详细打印每个条款的信息
         for (int idx = 0; idx < clauses.size(); idx++) {
             Clause clause = clauses.get(idx);
-            logger.info("【锚点插入】条款[{}]: id={}, anchorId={}, startParaIndex={}, heading='{}'",
+            logger.info("【锚点插入】条款[{}]: id={}, anchorId={}, startParaIndex={}, 段落数={}, heading='{}'",
                        idx, clause.getId(), clause.getAnchorId(), clause.getStartParaIndex(),
+                       clause.getParagraphAnchors() != null ? clause.getParagraphAnchors().size() : 0,
                        clause.getHeading());
         }
 
@@ -683,9 +811,29 @@ public class DocxUtils {
                 logger.info("【锚点插入】为条款添加书签: clauseId={}, anchorId={}, paraIndex={}",
                            clause.getId(), clause.getAnchorId(), paraIndex);
 
-                // 在段落开头插入书签
+                // 在段落开头插入主锚点书签
                 addBookmarkToParagraph(para, clause.getAnchorId());
                 successCount++;
+
+                // 【新增】如果有段落级锚点，也一起插入
+                if (clause.getParagraphAnchors() != null && !clause.getParagraphAnchors().isEmpty()) {
+                    logger.info("【锚点插入】为条款{}的{}个段落插入段落级锚点",
+                              clause.getId(), clause.getParagraphAnchors().size());
+
+                    for (ParagraphAnchor pa : clause.getParagraphAnchors()) {
+                        Integer paraIdx = pa.getParagraphIndex();
+                        if (paraIdx != null && paraIdx >= 0 && paraIdx < paragraphs.size()) {
+                            XWPFParagraph targetPara = paragraphs.get(paraIdx);
+                            logger.debug("【锚点插入】插入段落锚点: anchorId={}, paragraphIndex={}",
+                                       pa.getAnchorId(), paraIdx);
+                            addBookmarkToParagraph(targetPara, pa.getAnchorId());
+                            paragraphAnchorCount++;
+                        } else {
+                            logger.warn("【锚点插入】段落索引超出范围: paragraphIndex={}, 总段落数={}",
+                                       paraIdx, paragraphs.size());
+                        }
+                    }
+                }
             } else {
                 logger.warn("【锚点插入】段落索引超出范围: clauseId={}, anchorId={}, paraIndex={}, 总段落数={}",
                            clause.getId(), clause.getAnchorId(), paraIndex, paragraphs.size());
@@ -693,7 +841,8 @@ public class DocxUtils {
             }
         }
 
-        logger.info("【锚点插入】完成: 成功插入={}个, 跳过={}", successCount, skipCount);
+        logger.info("【锚点插入】完成: 主锚点成功插入={}个, 段落锚点成功插入={}个, 跳过={}",
+                   successCount, paragraphAnchorCount, skipCount);
     }
 
     /**

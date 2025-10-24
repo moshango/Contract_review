@@ -2,6 +2,9 @@
 let parseFile = null;
 let annotateFile = null;
 let autoReviewFile = null;
+let ruleReviewFile = null;
+let ruleReviewResult = null;
+let ruleReviewParseResultId = null;
 
 // 切换选项卡
 function switchTab(tabName) {
@@ -35,6 +38,17 @@ function handleAnnotateFileSelect(input) {
     if (file) {
         annotateFile = file;
         const fileNameSpan = document.getElementById('annotate-file-name');
+        fileNameSpan.textContent = file.name;
+        fileNameSpan.classList.add('selected');
+    }
+}
+
+// 处理规则审查文件选择
+function handleRuleReviewFileSelect(input) {
+    const file = input.files[0];
+    if (file) {
+        ruleReviewFile = file;
+        const fileNameSpan = document.getElementById('rule-review-file-name');
         fileNameSpan.textContent = file.name;
         fileNameSpan.classList.add('selected');
     }
@@ -1152,6 +1166,7 @@ function resetChatGPTForm() {
 // ============= 规则审查功能 =============
 let ruleReviewFile = null;
 let ruleReviewResult = null;
+let ruleReviewParseResultId = null;  // 【关键修复】保存 parseResultId 用于后续批注
 
 // 处理规则审查文件选择
 function handleRuleReviewFileSelect(input) {
@@ -1192,6 +1207,17 @@ async function startRuleReview() {
 
         const data = await response.json();
         ruleReviewResult = data;
+
+        // 【关键修复】保存 parseResultId 供后续批注使用
+        if (data.parseResultId) {
+            ruleReviewParseResultId = data.parseResultId;
+            console.log('✅ 【关键】已保存 parseResultId:', ruleReviewParseResultId);
+            console.log('   使用 window.ruleReviewParseResultId 可在控制台查看');
+            showToast('✅ 已生成 parseResultId，可用于后续批注', 'success');
+        } else {
+            console.warn('⚠️ 响应中未包含 parseResultId，后续批注可能不精确');
+            ruleReviewParseResultId = null;
+        }
 
         // 更新统计信息
         document.getElementById('stat-total-clauses').textContent = data.statistics.totalClauses;
@@ -1355,19 +1381,29 @@ async function importRuleReviewResult() {
     document.getElementById('rule-review-import-loading').style.display = 'block';
     document.getElementById('rule-review-import-result').style.display = 'none';
 
-    // 构建FormData - 使用带锚点的文档进行批注
+    // 【关键修复】构建 FormData - 无需传输文件，使用 parseResultId 获取缓存的带锚点文档
     const formData = new FormData();
-    formData.append('file', ruleReviewFile);
-    formData.append('review', chatgptResponse);
+    formData.append('chatgptResponse', chatgptResponse);
 
     try {
-        // 调用 /annotate 接口进行批注
-        const url = `/api/annotate?anchorStrategy=preferAnchor&cleanupAnchors=${cleanupAnchors}`;
+        // 【关键修复】使用 /chatgpt/import-result 端点并传递 parseResultId
+        let url = `/chatgpt/import-result?cleanupAnchors=${cleanupAnchors}`;
 
         console.log('🚀 开始导入规则审查结果...');
         console.log('   文件:', ruleReviewFile.name);
+        console.log('   parseResultId:', ruleReviewParseResultId);
         console.log('   cleanupAnchors:', cleanupAnchors);
         console.log('   问题数量:', parsedResponse.issues.length);
+
+        if (ruleReviewParseResultId) {
+            url += `&parseResultId=${encodeURIComponent(ruleReviewParseResultId)}`;
+            console.log('✅ 【关键】将传递 parseResultId 参数');
+            console.log('📡 请求URL:', url);
+            showToast('✅ 使用缓存的带锚点文档进行批注...', 'info');
+        } else {
+            console.warn('⚠️ parseResultId 不存在，批注可能不精确');
+            showToast('⚠️ 警告：未获取到 parseResultId，批注定位精度可能降低', 'warning');
+        }
 
         const response = await fetch(url, {
             method: 'POST',
@@ -1387,7 +1423,7 @@ async function importRuleReviewResult() {
         downloadFile(blob, filename);
 
         console.log('✅ 文件下载成功:', filename);
-        showRuleReviewImportResult(filename, parsedResponse.issues.length);
+        showRuleReviewImportResult(filename, parsedResponse.issues.length, !!ruleReviewParseResultId);
         showToast('✅ 规则审查结果导入成功! 文档已下载', 'success');
 
     } catch (error) {
@@ -1400,14 +1436,19 @@ async function importRuleReviewResult() {
 }
 
 // 显示规则审查导入结果
-function showRuleReviewImportResult(filename, issuesCount) {
+function showRuleReviewImportResult(filename, issuesCount, usedParseResultId = false) {
     const resultBox = document.getElementById('rule-review-import-result');
     const summaryDiv = document.getElementById('rule-review-import-summary');
+
+    // 【关键修复】根据是否使用了 parseResultId 显示不同的提示
+    const anchorStatusHTML = usedParseResultId
+        ? '<p style="color: #28a745; font-weight: bold;">✅ 使用缓存的带锚点文档进行批注 - 定位精度最高</p>'
+        : '<p style="color: #ffc107; font-weight: bold;">⚠️ 未使用缓存的文档 - 定位精度可能降低</p>';
 
     summaryDiv.innerHTML = `
         <div class="import-summary">
             <p><strong>📄 文件名:</strong> ${filename}</p>
-            <p><strong>✅ 状态:</strong> 规则审查结果导入成功</p>
+            ${anchorStatusHTML}
             <p><strong>📊 问题数量:</strong> ${issuesCount || '?'} 条问题已批注</p>
             <p><strong>📑 流程:</strong> 规则匹配 → ChatGPT审查 → 结果导入 → 批注生成</p>
             <p><strong>💡 说明:</strong> 审查意见已添加到合同相应位置（支持精确文字级别批注）</p>
@@ -1425,6 +1466,7 @@ function resetRuleReviewForm() {
     document.getElementById('rule-review-response').value = '';
     ruleReviewFile = null;
     ruleReviewResult = null;
+    ruleReviewParseResultId = null;  // 【关键修复】清理 parseResultId
     document.getElementById('rule-review-result').style.display = 'none';
     document.getElementById('rule-review-import-result').style.display = 'none';
     showToast('表单已重置，可继续审查其他合同', 'success');

@@ -49,6 +49,18 @@ public class QwenClient {
     }
 
     /**
+     * 非流式聊天（支持 List<ChatMessage> 参数）
+     */
+    public Mono<ChatResponse> chat(java.util.List<ChatMessage> messages, String model) {
+        ChatRequest request = ChatRequest.builder()
+                .messages(messages)
+                .model(model)
+                .stream(false)
+                .build();
+        return chat(request);
+    }
+
+    /**
      * 非流式聊天
      */
     public Mono<ChatResponse> chat(ChatRequest request) {
