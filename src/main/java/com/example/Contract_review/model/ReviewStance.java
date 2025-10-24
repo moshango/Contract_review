@@ -61,9 +61,11 @@ public class ReviewStance {
             return true;
         }
 
-        // 如果用户没有设置立场（中立），则只返回Neutral的规则
+        // 【BUG FIX】如果用户没有设置立场（中立），则返回所有规则
+        // 原来的逻辑只返回 Neutral 规则，导致许多规则被过滤掉（如 Rule 2 违约条款）
+        // 新逻辑：中立用户应该看到所有规则，以便进行全面的审查
         if (party == null || party.trim().isEmpty()) {
-            return "Neutral".equalsIgnoreCase(ruleScope);
+            return true;
         }
 
         // 如果用户设置了立场，则返回对应立场的规则或Neutral的规则
