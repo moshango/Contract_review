@@ -6,6 +6,20 @@ let ruleReviewFile = null;
 let ruleReviewResult = null;
 let ruleReviewParseResultId = null;
 
+// 切换选项卡
+function switchTab(tabName) {
+    // 移除所有活动状态
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelectorAll('.panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+
+    // 激活选中的选项卡
+    event.target.classList.add('active');
+    document.getElementById(tabName + '-panel').classList.add('active');
+}
 
 // 处理解析文件选择
 function handleParseFileSelect(input) {
@@ -519,6 +533,10 @@ function copyPromptResult() {
     });
 }
 
+// ========== 扩展原有的switchTab函数 ==========
+
+// 重新定义switchTab函数以支持新的选项卡
+const originalSwitchTab = switchTab;
 function switchTab(tabName) {
     // 移除所有活动状态
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1146,6 +1164,9 @@ function resetChatGPTForm() {
 }
 
 // ============= 规则审查功能 =============
+let ruleReviewFile = null;
+let ruleReviewResult = null;
+let ruleReviewParseResultId = null;  // 【关键修复】保存 parseResultId 用于后续批注
 
 // 处理规则审查文件选择
 function handleRuleReviewFileSelect(input) {
