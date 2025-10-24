@@ -10,8 +10,6 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 
 /**
  * 主页控制器
@@ -29,9 +27,12 @@ public class HomeController {
         try {
             Resource resource = new ClassPathResource("static/index.html");
             if (resource.exists()) {
-                byte[] content = Files.readAllBytes(Paths.get(resource.getURI()));
+                // 使用 getInputStream() 而不是 Paths.get()
+                // 这样可以兼容 JAR 包中的资源
+                byte[] content = resource.getInputStream().readAllBytes();
                 HttpHeaders headers = new HttpHeaders();
                 headers.setContentType(MediaType.TEXT_HTML);
+                headers.setContentLength(content.length);
                 return new ResponseEntity<>(content, headers, HttpStatus.OK);
             } else {
                 return new ResponseEntity<>(HttpStatus.NOT_FOUND);
