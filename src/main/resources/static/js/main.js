@@ -1313,15 +1313,18 @@ async function importRuleReviewResult() {
         // 【关键修复】使用 /chatgpt/import-result 端点并传递 parseResultId
         let url = `/chatgpt/import-result?cleanupAnchors=${cleanupAnchors}`;
 
+        // 【关键修复】使用 window.ruleReviewParseResultId（全局变量）而非局部变量
+        const globalParseResultId = window.ruleReviewParseResultId;
+
         console.log('🚀 开始导入规则审查结果...');
         console.log('   文件:', ruleReviewFile.name);
-        console.log('   parseResultId:', ruleReviewParseResultId);
+        console.log('   parseResultId (from window):', globalParseResultId);
         console.log('   cleanupAnchors:', cleanupAnchors);
         console.log('   问题数量:', parsedResponse.issues.length);
 
-        if (ruleReviewParseResultId) {
-            url += `&parseResultId=${encodeURIComponent(ruleReviewParseResultId)}`;
-            console.log('✅ 【关键】将传递 parseResultId 参数');
+        if (globalParseResultId) {
+            url += `&parseResultId=${encodeURIComponent(globalParseResultId)}`;
+            console.log('✅ 【关键】将传递 parseResultId 参数:', globalParseResultId);
             console.log('📡 请求URL:', url);
             showToast('✅ 使用缓存的带锚点文档进行批注...', 'info');
         } else {
