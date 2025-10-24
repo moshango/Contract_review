@@ -5,10 +5,13 @@ import com.example.Contract_review.model.ReviewRule;
 import com.example.Contract_review.model.RuleMatchResult;
 import com.example.Contract_review.model.Clause;
 import com.example.Contract_review.model.ReviewStance;
+import com.example.Contract_review.model.PartyExtractionRequest;
+import com.example.Contract_review.model.PartyExtractionResponse;
 import com.example.Contract_review.service.ContractParseService;
 import com.example.Contract_review.service.ReviewRulesService;
 import com.example.Contract_review.service.ParseResultCache;
 import com.example.Contract_review.service.ReviewStanceService;
+import com.example.Contract_review.service.PartyExtractionService;
 import com.example.Contract_review.util.PromptGenerator;
 import com.example.Contract_review.util.PromptGeneratorNew;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -49,6 +52,9 @@ public class ApiReviewController {
 
     @Autowired
     private ReviewStanceService reviewStanceService;
+
+    @Autowired
+    private PartyExtractionService partyExtractionService;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -164,6 +170,16 @@ public class ApiReviewController {
             response.put("userStance", stance.getParty() != null ? stance.getParty() : "Neutral");
             response.put("stanceDescription", stance.getDescription());
             response.put("timestamp", System.currentTimeMillis());
+
+            // 【新增】添加识别的甲乙方信息到响应
+            if (parseResult.getPartyA() != null) {
+                response.put("partyA", parseResult.getPartyA());
+                logger.info("✓ 返回识别的甲方: {}", parseResult.getPartyA());
+            }
+            if (parseResult.getPartyB() != null) {
+                response.put("partyB", parseResult.getPartyB());
+                logger.info("✓ 返回识别的乙方: {}", parseResult.getPartyB());
+            }
 
             // 统计信息
             ObjectNode stats = response.putObject("statistics");
@@ -472,5 +488,82 @@ public class ApiReviewController {
         }
 
         return "low";
+    }
+
+    /**
+     * 提取合同方信息接口
+     *
+     * 【新增】用于规则审查的第一步：
+     * 1. 接收已解析的合同文本
+     * 2. 使用 Qwen 识别甲乙方
+     * 3. 返回识别结果，让用户选择立场
+     *
+     * @param request 包含合同文本和类型的请求
+     * @return 包含甲乙方信息和推荐立场的响应
+     */
+    @PostMapping("/extract-parties")
+    public ResponseEntity<?> extractParties(@RequestBody PartyExtractionRequest request) {
+        long startTime = System.currentTimeMillis();
+
+        try {
+            logger.info("=== 开始提取合同方信息 ===");
+
+            // 验证 Qwen 服务
+            if (!partyExtractionService.isQwenAvailable()) {
+                ObjectNode error = objectMapper.createObjectNode();
+                error.put("success", false);
+                error.put("error", "Qwen服务未配置或不可用");
+                error.put("hint", "请检查application.properties中的qwen配置");
+                logger.error("Qwen服务不可用");
+                return ResponseEntity.badRequest().body(error);
+            }
+
+            // 验证输入
+            if (request.getContractText() == null || request.getContractText().isEmpty()) {
+                ObjectNode error = objectMapper.createObjectNode();
+                error.put("success", false);
+                error.put("error", "合同文本不能为空");
+                logger.error("合同文本为空");
+                return ResponseEntity.badRequest().body(error);
+            }
+
+            logger.info("✓ 参数验证通过，合同文本长度: {} 字符", request.getContractText().length());
+
+            // 调用服务提取合同方
+            PartyExtractionResponse partyResponse = partyExtractionService.extractPartyInfoWithQwen(request);
+
+            // 构建响应
+            ObjectNode response = objectMapper.createObjectNode();
+
+            if (partyResponse.isSuccess()) {
+                response.put("success", true);
+                response.put("partyA", partyResponse.getPartyA());
+                response.put("partyB", partyResponse.getPartyB());
+                response.put("partyARoleName", partyResponse.getPartyARoleName());
+                response.put("partyBRoleName", partyResponse.getPartyBRoleName());
+                response.put("recommendedStance", partyResponse.getRecommendedStance());
+                response.put("stanceReason", partyResponse.getStanceReason());
+                response.put("message", "已识别甲乙方信息，请选择您的立场");
+
+                logger.info("✓ 合同方提取成功: A={}, B={}", partyResponse.getPartyA(), partyResponse.getPartyB());
+            } else {
+                response.put("success", false);
+                response.put("error", partyResponse.getErrorMessage());
+                logger.error("合同方提取失败: {}", partyResponse.getErrorMessage());
+            }
+
+            response.put("processingTime", partyResponse.getProcessingTime() + "ms");
+            response.put("timestamp", System.currentTimeMillis());
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("合同方提取处理失败", e);
+            ObjectNode error = objectMapper.createObjectNode();
+            error.put("success", false);
+            error.put("error", "处理失败: " + e.getMessage());
+            error.put("timestamp", System.currentTimeMillis());
+            return ResponseEntity.status(500).body(error);
+        }
     }
 }

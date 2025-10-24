@@ -108,13 +108,9 @@
                 </div>
                 <div class="form-group">
                     <label>审查立场: (选择您的身份，获得针对性的审查建议)</label>
-                    <div style="display: flex; gap: 15px; margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px;">
+                    <div style="display: flex; gap: 15px; margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px; display: none;">
                         <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                            <input type="radio" name="rule-review-stance" value="Neutral" checked>
-                            <span><strong>中立</strong> (显示所有通用规则)</span>
-                        </label>
-                        <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                            <input type="radio" name="rule-review-stance" value="A">
+                            <input type="radio" name="rule-review-stance" value="A" checked>
                             <span><strong>甲方</strong> (获得甲方有利的建议)</span>
                         </label>
                         <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
@@ -123,6 +119,22 @@
                         </label>
                     </div>
                     <p style="font-size: 12px; color: #666; margin-top: 8px;">💡 提示：不同立场会返回针对性的审查建议。甲方更关注条款对自己的不利；乙方更关注如何保护自己的权益。</p>
+                </div>
+
+                <!-- 【新增】识别的合同方信息展示 -->
+                <div id="identified-parties-info" class="form-group" style="display: none; background: #e8f5e9; padding: 15px; border-radius: 4px; border-left: 4px solid #4CAF50;">
+                    <h4 style="margin: 0 0 10px 0; color: #2e7d32;">✓ 已识别合同方信息</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div>
+                            <div style="font-weight: bold; color: #555; margin-bottom: 5px;">甲方:</div>
+                            <div id="identified-party-a" style="color: #2e7d32; font-size: 14px;">-</div>
+                        </div>
+                        <div>
+                            <div style="font-weight: bold; color: #555; margin-bottom: 5px;">乙方:</div>
+                            <div id="identified-party-b" style="color: #2e7d32; font-size: 14px;">-</div>
+                        </div>
+                    </div>
+                    <p style="font-size: 12px; color: #666; margin-top: 10px; margin-bottom: 0;">💡 提示：根据识别结果，建议您选择对应的立场以获得更准确的审查建议。</p>
                 </div>
 
                 <button class="btn btn-primary btn-large" onclick="startRuleReview()">
@@ -722,5 +734,6 @@
 
     <script src="/js/main.js"></script>
     <script src="/js/qwen-review.js"></script>
+    <script src="/js/party-extraction.js"></script>
 </body>
 </html>

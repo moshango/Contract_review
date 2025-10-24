@@ -1165,66 +1165,11 @@ async function startRuleReview() {
         return;
     }
 
-    const contractType = document.getElementById('rule-review-contract-type').value;
+    // 【新流程】第一步：提取合同方信息，而不是直接审查
+    console.log('📋 开始新的规则审查流程: 先提取合同方，用户选择立场后再审查');
 
-    showLoading('rule-review');
-    document.getElementById('rule-review-result').style.display = 'none';
-
-    const formData = new FormData();
-    formData.append('file', ruleReviewFile);
-
-    try {
-        const response = await fetch(`/api/review/analyze?contractType=${encodeURIComponent(contractType)}`, {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || '规则审查失败');
-        }
-
-        const data = await response.json();
-        ruleReviewResult = data;
-
-        // 【关键修复】保存 parseResultId 供后续批注使用
-        if (data.parseResultId) {
-            ruleReviewParseResultId = data.parseResultId;
-            console.log('✅ 【关键】已保存 parseResultId:', ruleReviewParseResultId);
-            console.log('   使用 window.ruleReviewParseResultId 可在控制台查看');
-            showToast('✅ 已生成 parseResultId，可用于后续批注', 'success');
-        } else {
-            console.warn('⚠️ 响应中未包含 parseResultId，后续批注可能不精确');
-            ruleReviewParseResultId = null;
-        }
-
-        // 更新统计信息
-        document.getElementById('stat-total-clauses').textContent = data.statistics.totalClauses;
-        document.getElementById('stat-matched-clauses').textContent = data.statistics.matchedClauses;
-        document.getElementById('stat-high-risk').textContent = data.statistics.highRiskClauses;
-        document.getElementById('stat-total-rules').textContent = data.statistics.totalMatchedRules;
-
-        // 更新风险分布
-        document.getElementById('risk-high').textContent = data.guidance.riskDistribution.high;
-        document.getElementById('risk-medium').textContent = data.guidance.riskDistribution.medium;
-        document.getElementById('risk-low').textContent = data.guidance.riskDistribution.low;
-
-        // 显示匹配的条款
-        displayRuleReviewClauses(data.matchResults);
-
-        // 显示 Prompt
-        document.getElementById('rule-review-prompt').textContent = data.prompt;
-
-        // 显示结果
-        document.getElementById('rule-review-result').style.display = 'block';
-        document.getElementById('rule-review-loading').style.display = 'none';
-
-        showToast(`✅ 审查完成! 检出${data.statistics.matchedClauses}个需要审查的条款`, 'success');
-
-    } catch (error) {
-        hideLoading('rule-review');
-        showToast('规则审查失败: ' + error.message, 'error');
-    }
+    // 调用新的提取流程
+    await extractRuleReviewParties();
 }
 
 // 显示规则审查匹配的条款

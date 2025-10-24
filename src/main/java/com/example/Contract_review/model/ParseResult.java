@@ -30,6 +30,32 @@ public class ParseResult {
     private String title;
 
     /**
+     * 甲方名称（从合同文本中识别）
+     */
+    private String partyA;
+
+    /**
+     * 乙方名称（从合同文本中识别）
+     */
+    private String partyB;
+
+    /**
+     * 甲方角色标签（如：甲方、买方、委托方等）
+     */
+    private String partyARoleName;
+
+    /**
+     * 乙方角色标签（如：乙方、卖方、受托方等）
+     */
+    private String partyBRoleName;
+
+    /**
+     * 完整的合同文本（包含甲乙方信息）
+     * 用于后续的合同方信息提取和 AI 分析
+     */
+    private String fullContractText;
+
+    /**
      * 解析得到的条款列表
      */
     private List<Clause> clauses;

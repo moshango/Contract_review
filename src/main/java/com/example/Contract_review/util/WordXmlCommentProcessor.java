@@ -148,22 +148,54 @@ public class WordXmlCommentProcessor {
         logger.info("开始XML方式添加批注：issues数量={}, 策略={}, 清理锚点={}",
                    issues.size(), anchorStrategy, cleanupAnchors);
 
+        // 输入校验
+        if (docxBytes == null || docxBytes.length == 0) {
+            throw new IllegalArgumentException("文档字节数组为空");
+        }
+
+        if (issues == null || issues.isEmpty()) {
+            logger.warn("没有要添加的批注，直接返回原始文档");
+            return docxBytes;
+        }
+
         // 打开DOCX包
         try (InputStream docxStream = new ByteArrayInputStream(docxBytes);
              OPCPackage opcPackage = OPCPackage.open(docxStream)) {
 
             // 处理document.xml
             Document documentXml = loadDocumentXml(opcPackage);
+            if (documentXml == null) {
+                throw new IllegalArgumentException("无法加载document.xml，文档可能损坏");
+            }
 
             // 处理comments.xml（如果不存在则创建）
             Document commentsXml = loadOrCreateCommentsXml(opcPackage);
+            if (commentsXml == null) {
+                throw new IllegalArgumentException("无法创建comments.xml");
+            }
+
+            // 【修复】重新计算批注ID起始值，避免与现有批注冲突
+            initializeCommentIdCounter(commentsXml);
 
             // 为每个问题添加批注
             int addedCount = 0;
+            int failedCount = 0;
             for (ReviewIssue issue : issues) {
-                if (addCommentForIssue(documentXml, commentsXml, issue, anchorStrategy)) {
-                    addedCount++;
+                try {
+                    if (addCommentForIssue(documentXml, commentsXml, issue, anchorStrategy)) {
+                        addedCount++;
+                    } else {
+                        failedCount++;
+                    }
+                } catch (Exception e) {
+                    logger.error("添加批注失败，继续处理下一个：clauseId={}, 错误: {}",
+                               issue.getClauseId(), e.getMessage());
+                    failedCount++;
                 }
+            }
+
+            if (addedCount == 0) {
+                logger.warn("⚠️ 没有成功添加任何批注（共{}个失败），请检查文档内容是否匹配", failedCount);
             }
 
             // 清理锚点（如果需要）
@@ -183,8 +215,11 @@ public class WordXmlCommentProcessor {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             opcPackage.save(outputStream);
 
-            logger.info("XML批注处理完成：成功添加{}个批注", addedCount);
+            logger.info("XML批注处理完成：成功添加{}个批注，失败{}个", addedCount, failedCount);
             return outputStream.toByteArray();
+        } catch (Exception e) {
+            logger.error("批注处理失败：{}", e.getMessage(), e);
+            throw new Exception("批注处理异常：" + e.getMessage(), e);
         }
     }
 
@@ -236,6 +271,60 @@ public class WordXmlCommentProcessor {
         root.addNamespace("w16se", "http://schemas.microsoft.com/office/word/2015/wordml/symex");
 
         return doc;
+    }
+
+    /**
+     * 初始化批注ID计数器
+     * 【修复】扫描现有comments.xml中的所有批注ID，确保新批注ID不会冲突
+     */
+    private void initializeCommentIdCounter(Document commentsXml) {
+        try {
+            if (commentsXml == null) {
+                logger.warn("comments.xml为null，使用默认批注ID计数器");
+                return;
+            }
+
+            Element commentsRoot = commentsXml.getRootElement();
+            if (commentsRoot == null) {
+                logger.warn("comments根元素为null，使用默认批注ID计数器");
+                return;
+            }
+
+            // 获取所有现有批注元素
+            List<Element> comments = commentsRoot.elements(QName.get("comment", W_NS));
+
+            if (comments.isEmpty()) {
+                logger.debug("comments.xml中没有现有批注，重置计数器为1");
+                commentIdCounter.set(1);
+                return;
+            }
+
+            // 找到最大的ID
+            int maxId = 0;
+            for (Element comment : comments) {
+                try {
+                    String idStr = comment.attributeValue(QName.get("id", W_NS));
+                    if (idStr != null && !idStr.isEmpty()) {
+                        int id = Integer.parseInt(idStr);
+                        if (id > maxId) {
+                            maxId = id;
+                        }
+                    }
+                } catch (NumberFormatException e) {
+                    logger.warn("无法解析批注ID：{}", comment.attributeValue(QName.get("id", W_NS)));
+                }
+            }
+
+            // 设置计数器为最大ID + 1
+            int nextId = maxId + 1;
+            commentIdCounter.set(nextId);
+            logger.info("【批注冲突检测】检测到{}个现有批注，最大ID={}, 设置新批注ID起始值为{}",
+                       comments.size(), maxId, nextId);
+
+        } catch (Exception e) {
+            logger.warn("初始化批注ID计数器失败，使用默认值：{}", e.getMessage());
+            commentIdCounter.set(1);
+        }
     }
 
     /**

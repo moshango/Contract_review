@@ -2,9 +2,12 @@ package com.example.Contract_review.service;
 
 import com.example.Contract_review.model.Clause;
 import com.example.Contract_review.model.ParseResult;
+import com.example.Contract_review.model.PartyInfo;
 import com.example.Contract_review.util.DocxUtils;
+import com.example.Contract_review.util.PartyNameExtractor;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +33,9 @@ public class ContractParseService {
     @Autowired
     private DocxUtils docxUtils;
 
+    @Autowired
+    private ParseResultCache parseResultCache;
+
     /**
      * 解析合同文档
      *
@@ -53,14 +59,26 @@ public class ContractParseService {
         boolean generateAnchors = "generate".equalsIgnoreCase(anchorMode) ||
                                   "regenerate".equalsIgnoreCase(anchorMode);
 
+        // 【关键修复】先读取文件字节，避免多次读取流导致数据丢失
+        byte[] fileBytes;
+        try {
+            fileBytes = file.getBytes();
+        } catch (IOException e) {
+            logger.error("无法读取文件字节", e);
+            throw e;
+        }
+
         List<Clause> clauses;
         String title;
         int wordCount;
         int paragraphCount;
+        byte[] anchoredDocumentBytes = null;  // 【新增】用于缓存
+        PartyInfo partyInfo = null;
+        String fullContractText = "";
 
         if (isDocx) {
             // 处理 .docx 文件
-            XWPFDocument doc = docxUtils.loadDocx(file.getInputStream());
+            XWPFDocument doc = docxUtils.loadDocx(new ByteArrayInputStream(fileBytes));
 
             // 【修复】使用真实段落索引方法（解决虚拟索引混乱问题）
             // 之前: extractClausesWithTables() 使用虚拟索引（混入表格），导致批注定位错误
@@ -70,14 +88,48 @@ public class ContractParseService {
             title = docxUtils.extractTitle(doc);
             wordCount = docxUtils.countWords(doc);
             paragraphCount = docxUtils.countParagraphs(doc);
+
+            // 【新增】如果需要生成锚点，保存带锚点的文档
+            if (generateAnchors) {
+                anchoredDocumentBytes = docxUtils.writeToBytes(doc);
+                logger.info("✓ 带锚点文档已生成，大小: {} 字节", anchoredDocumentBytes != null ? anchoredDocumentBytes.length : 0);
+            }
+
+            // 【新增】在同一个文档加载中提取甲乙方信息和完整合同文本（避免重新加载文件）
+            StringBuilder fullText = new StringBuilder();
+            doc.getParagraphs().forEach(p -> fullText.append(p.getText()).append("\n"));
+            fullContractText = fullText.toString();
+            partyInfo = extractPartyInfoFromDocx(doc);
+
+            if (partyInfo != null && partyInfo.isComplete()) {
+                logger.info("✓ 识别到甲方: {}, 乙方: {}", partyInfo.getPartyA(), partyInfo.getPartyB());
+            } else {
+                logger.warn("⚠ 未能完整识别甲乙方信息");
+            }
+
+            doc.close();
         } else {
             // 处理 .doc 文件（旧格式不支持表格提取）
-            HWPFDocument doc = docxUtils.loadDoc(file.getInputStream());
+            HWPFDocument doc = docxUtils.loadDoc(new ByteArrayInputStream(fileBytes));
             List<String> paragraphs = docxUtils.parseDocParagraphs(doc);
             clauses = docxUtils.extractClauses(paragraphs, generateAnchors);
             title = paragraphs.isEmpty() ? "未命名文档" : paragraphs.get(0);
             wordCount = paragraphs.stream().mapToInt(String::length).sum();
             paragraphCount = paragraphs.size();
+
+            // 【新增】在同一个文档加载中提取甲乙方信息和完整合同文本
+            StringBuilder fullText = new StringBuilder();
+            paragraphs.forEach(p -> fullText.append(p).append("\n"));
+            fullContractText = fullText.toString();
+            partyInfo = extractPartyInfoFromParagraphs(paragraphs);
+
+            if (partyInfo != null && partyInfo.isComplete()) {
+                logger.info("✓ 识别到甲方: {}, 乙方: {}", partyInfo.getPartyA(), partyInfo.getPartyB());
+            } else {
+                logger.warn("⚠ 未能完整识别甲乙方信息");
+            }
+
+            doc.close();
         }
 
         // 提取条款（原有逻辑已经整合到上面）
@@ -86,17 +138,54 @@ public class ContractParseService {
         logger.info("解析完成: title={}, clauses={}, wordCount={}, paragraphCount={}",
                     title, clauses.size(), wordCount, paragraphCount);
 
+        // 提取字符串值，用于返回结果
+        String partyA = (partyInfo != null) ? partyInfo.getPartyA() : null;
+        String partyB = (partyInfo != null) ? partyInfo.getPartyB() : null;
+        String partyARoleName = (partyInfo != null) ? partyInfo.getPartyARoleName() : null;
+        String partyBRoleName = (partyInfo != null) ? partyInfo.getPartyBRoleName() : null;
+
+        // 【新增】缓存带锚点的文档，生成 parseResultId
+        String parseResultId = null;
+        if (generateAnchors && anchoredDocumentBytes != null && anchoredDocumentBytes.length > 0) {
+            ParseResult tempResult = ParseResult.builder()
+                    .filename(filename)
+                    .title(title)
+                    .partyA(partyA)
+                    .partyB(partyB)
+                    .partyARoleName(partyARoleName)
+                    .partyBRoleName(partyBRoleName)
+                    .fullContractText(fullContractText)
+                    .clauses(clauses)
+                    .build();
+
+            parseResultId = parseResultCache.store(tempResult, anchoredDocumentBytes, filename);
+            logger.info("✓ 带锚点文档已保存到缓存，parseResultId: {}", parseResultId);
+        }
+
         // 构建元数据
         Map<String, Object> meta = new HashMap<>();
         meta.put("wordCount", wordCount);
         meta.put("paragraphCount", paragraphCount);
 
-        return ParseResult.builder()
+        ParseResult result = ParseResult.builder()
                 .filename(filename)
                 .title(title)
+                .partyA(partyA)
+                .partyB(partyB)
+                .partyARoleName(partyARoleName)
+                .partyBRoleName(partyBRoleName)
+                .fullContractText(fullContractText)
                 .clauses(clauses)
                 .meta(meta)
                 .build();
+
+        // 【新增】将 parseResultId 添加到结果中（需要在 ParseResult 中添加字段）
+        // 暂时通过 meta 传递
+        if (parseResultId != null) {
+            result.getMeta().put("parseResultId", parseResultId);
+        }
+
+        return result;
     }
 
     /**
@@ -143,6 +232,23 @@ public class ContractParseService {
             int wordCount = docxUtils.countWords(doc);
             int paragraphCount = docxUtils.countParagraphs(doc);
 
+            // 【新增】提取甲方和乙方名称
+            String partyA = null;
+            String partyB = null;
+            StringBuilder fullText = new StringBuilder();
+            doc.getParagraphs().forEach(p -> fullText.append(p.getText()).append("\n"));
+
+            String textForParsing = fullText.length() > 3000 ?
+                                   fullText.substring(0, 3000) :
+                                   fullText.toString();
+
+            Map<String, String> partyNames = PartyNameExtractor.extractPartyNames(textForParsing);
+            if (partyNames != null) {
+                partyA = partyNames.get("partyA");
+                partyB = partyNames.get("partyB");
+                logger.info("✓ 识别到甲方: {}, 乙方: {}", partyA, partyB);
+            }
+
             // 构建元数据
             Map<String, Object> meta = new HashMap<>();
             meta.put("wordCount", wordCount);
@@ -151,6 +257,8 @@ public class ContractParseService {
             ParseResult parseResult = ParseResult.builder()
                     .filename(filename)
                     .title(title)
+                    .partyA(partyA)
+                    .partyB(partyB)
                     .clauses(clauses)
                     .meta(meta)
                     .build();
@@ -200,5 +308,161 @@ public class ContractParseService {
         public byte[] getDocumentBytes() {
             return documentBytes;
         }
+    }
+
+    /**
+     * 从 DOCX 文档中识别甲乙方信息
+     * 支持多种标签格式：甲方、买方、委托方等
+     *
+     * @param doc DOCX 文档
+     * @return 包含甲乙方信息的 PartyInfo 对象
+     */
+    private PartyInfo extractPartyInfoFromDocx(XWPFDocument doc) {
+        PartyInfo.PartyInfoBuilder builder = PartyInfo.builder();
+
+        String partyALine = null;
+        String partyBLine = null;
+
+        // 支持的甲方关键词
+        String[] partyAKeywords = {"甲方", "买方", "委托方", "需方", "发包人", "客户", "订购方", "用户"};
+        // 支持的乙方关键词
+        String[] partyBKeywords = {"乙方", "卖方", "受托方", "供方", "承包人", "服务商", "承接方", "被委托方"};
+
+        // 遍历所有段落寻找甲乙方信息
+        for (XWPFParagraph para : doc.getParagraphs()) {
+            String text = para.getText().trim();
+
+            if (text.isEmpty()) continue;
+
+            // 检查甲方关键词（仅在未识别时）
+            if (builder.build().getPartyA() == null) {
+                for (String keyword : partyAKeywords) {
+                    if (text.contains(keyword) && text.contains("：")) {
+                        // 提取冒号后的内容
+                        String[] parts = text.split("[:：]");
+                        if (parts.length > 1) {
+                            String partyName = parts[1].trim();
+                            // 清理括号等特殊符号
+                            partyName = partyName.replaceAll("[（(].*?[）)]", "").trim();
+                            // 只接受非空的公司名称（不是下划线或纯空白）
+                            if (!partyName.isEmpty() && !partyName.matches("^[_\\s]+$")) {
+                                builder.partyA(partyName);
+                                builder.partyARoleName(keyword);
+                                builder.partyALine(text);
+                                logger.info("✓ 识别甲方: {}, 标签: {}", partyName, keyword);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 检查乙方关键词（仅在未识别时）
+            if (builder.build().getPartyB() == null) {
+                for (String keyword : partyBKeywords) {
+                    if (text.contains(keyword) && text.contains("：")) {
+                        // 提取冒号后的内容
+                        String[] parts = text.split("[:：]");
+                        if (parts.length > 1) {
+                            String partyName = parts[1].trim();
+                            // 清理括号等特殊符号
+                            partyName = partyName.replaceAll("[（(].*?[）)]", "").trim();
+                            // 只接受非空的公司名称（不是下划线或纯空白）
+                            if (!partyName.isEmpty() && !partyName.matches("^[_\\s]+$")) {
+                                builder.partyB(partyName);
+                                builder.partyBRoleName(keyword);
+                                builder.partyBLine(text);
+                                logger.info("✓ 识别乙方: {}, 标签: {}", partyName, keyword);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 早期退出：如果已识别到双方，停止遍历
+            if (builder.build().getPartyA() != null && builder.build().getPartyB() != null) {
+                logger.info("已识别到甲乙双方，停止继续搜索");
+                break;
+            }
+        }
+
+        return builder.build();
+    }
+
+    /**
+     * 从段落列表中识别甲乙方信息（用于 DOC 格式）
+     *
+     * @param paragraphs 段落文本列表
+     * @return 包含甲乙方信息的 PartyInfo 对象
+     */
+    private PartyInfo extractPartyInfoFromParagraphs(List<String> paragraphs) {
+        PartyInfo.PartyInfoBuilder builder = PartyInfo.builder();
+
+        // 支持的甲方关键词
+        String[] partyAKeywords = {"甲方", "买方", "委托方", "需方", "发包人", "客户", "订购方", "用户"};
+        // 支持的乙方关键词
+        String[] partyBKeywords = {"乙方", "卖方", "受托方", "供方", "承包人", "服务商", "承接方", "被委托方"};
+
+        // 遍历所有段落寻找甲乙方信息
+        for (String text : paragraphs) {
+            text = text.trim();
+
+            if (text.isEmpty()) continue;
+
+            // 检查甲方关键词（仅在未识别时）
+            if (builder.build().getPartyA() == null) {
+                for (String keyword : partyAKeywords) {
+                    if (text.contains(keyword) && text.contains("：")) {
+                        // 提取冒号后的内容
+                        String[] parts = text.split("[:：]");
+                        if (parts.length > 1) {
+                            String partyName = parts[1].trim();
+                            // 清理括号等特殊符号
+                            partyName = partyName.replaceAll("[（(].*?[）)]", "").trim();
+                            // 只接受非空的公司名称（不是下划线或纯空白）
+                            if (!partyName.isEmpty() && !partyName.matches("^[_\\s]+$")) {
+                                builder.partyA(partyName);
+                                builder.partyARoleName(keyword);
+                                builder.partyALine(text);
+                                logger.info("✓ 识别甲方: {}, 标签: {}", partyName, keyword);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 检查乙方关键词（仅在未识别时）
+            if (builder.build().getPartyB() == null) {
+                for (String keyword : partyBKeywords) {
+                    if (text.contains(keyword) && text.contains("：")) {
+                        // 提取冒号后的内容
+                        String[] parts = text.split("[:：]");
+                        if (parts.length > 1) {
+                            String partyName = parts[1].trim();
+                            // 清理括号等特殊符号
+                            partyName = partyName.replaceAll("[（(].*?[）)]", "").trim();
+                            // 只接受非空的公司名称（不是下划线或纯空白）
+                            if (!partyName.isEmpty() && !partyName.matches("^[_\\s]+$")) {
+                                builder.partyB(partyName);
+                                builder.partyBRoleName(keyword);
+                                builder.partyBLine(text);
+                                logger.info("✓ 识别乙方: {}, 标签: {}", partyName, keyword);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 早期退出：如果已识别到双方，停止遍历
+            if (builder.build().getPartyA() != null && builder.build().getPartyB() != null) {
+                logger.info("已识别到甲乙双方，停止继续搜索");
+                break;
+            }
+        }
+
+        return builder.build();
     }
 }

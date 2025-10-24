@@ -159,6 +159,11 @@ public class ChatGPTIntegrationController {
                        file != null ? "✓ " + file.getOriginalFilename() : "✗ NULL",
                        anchorStrategy, cleanupAnchors);
 
+            // 【修复】优先级别参数验证
+            if (chatgptResponse == null || chatgptResponse.trim().isEmpty()) {
+                throw new IllegalArgumentException("chatgptResponse参数缺失或为空");
+            }
+
             // 【关键修复】优先使用缓存的带锚点文档
             byte[] documentToAnnotate = null;
             String sourceInfo = "";
@@ -283,6 +288,11 @@ public class ChatGPTIntegrationController {
         try {
             logger.info("导入ChatGPT审查结果（XML专用端点）: parseResultId={}, hasFile={}, strategy={}, cleanup={}",
                        parseResultId, file != null, anchorStrategy, cleanupAnchors);
+
+            // 【修复】优先级别参数验证
+            if (chatgptResponse == null || chatgptResponse.trim().isEmpty()) {
+                throw new IllegalArgumentException("chatgptResponse参数缺失或为空");
+            }
 
             // 【修复关键】优先使用缓存的带锚点文档
             byte[] documentToAnnotate = null;

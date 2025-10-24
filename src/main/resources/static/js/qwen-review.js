@@ -70,6 +70,9 @@ async function startQwenReview() {
             const reviewJson = JSON.stringify(result.review, null, 2);
             document.getElementById('rule-review-response').value = reviewJson;
 
+            // 【关键】确保 parseResultId 仍然可用
+            console.log('✅ Qwen审查完成，当前 ruleReviewParseResultId:', window.ruleReviewParseResultId);
+
             const issueCount = result.issueCount || 0;
             progressIcon.textContent = '✅';
             progressText.textContent = '审查完成！检出 ' + issueCount + ' 个问题';
