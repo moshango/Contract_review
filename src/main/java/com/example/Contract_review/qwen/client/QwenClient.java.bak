@@ -233,10 +233,10 @@ public class QwenClient {
      */
     public Map<String, String> getConfig() {
         Map<String, String> config = new HashMap<>();
-        config.put("base-url", baseUrl);
+        config.put("baseUrl", baseUrl);
         config.put("model", defaultModel);
         config.put("timeout", timeoutSeconds + "s");
-        config.put("api-key", apiKey != null ? apiKey : "");
+        config.put("apiKeySet", String.valueOf(apiKey != null && !apiKey.isEmpty()));
         return config;
     }
 }

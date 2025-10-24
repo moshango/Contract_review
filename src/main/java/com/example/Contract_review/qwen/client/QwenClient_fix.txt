@@ -1,0 +1,4 @@
+修复内容：
+在 getConfig() 方法中，改为：
+config.put("base-url", baseUrl);   // 改为 "base-url"（原为 "baseUrl"）
+config.put("api-key", apiKey != null ? apiKey : "");  // 改为返回实际API Key（原为 "apiKeySet"）
