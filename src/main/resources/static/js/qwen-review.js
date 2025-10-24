@@ -36,12 +36,15 @@ async function startQwenReview() {
         const requestData = {
             prompt: prompt,
             contractType: document.getElementById('rule-review-contract-type').value,
-            stance: document.querySelector('input[name="rule-review-stance"]:checked')?.value || 'Neutral'
+            stance: document.querySelector('input[name="rule-review-stance"]:checked')?.value || 'Neutral',
+            // 【关键修复】添加 parseResultId 到请求中
+            parseResultId: window.ruleReviewParseResultId || null
         };
 
         console.log('请求数据:', {
             contractType: requestData.contractType,
             stance: requestData.stance,
+            parseResultId: requestData.parseResultId,
             promptLength: requestData.prompt.length
         });
 

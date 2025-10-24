@@ -81,6 +81,14 @@ public class QwenRuleReviewController {
             response.put("issueCount", issues.size());
             response.put("timestamp", System.currentTimeMillis());
 
+            // 【关键修复】添加 parseResultId - 用于后续批注导入
+            if (request.getParseResultId() != null && !request.getParseResultId().isEmpty()) {
+                response.put("parseResultId", request.getParseResultId());
+                log.info("✓ parseResultId 已添加到响应: {}", request.getParseResultId());
+            } else {
+                log.warn("⚠️ 请求中未包含 parseResultId，后续批注导入可能精度较低");
+            }
+
             // 添加审查结果JSON
             try {
                 ObjectNode reviewJson = (ObjectNode) objectMapper.readTree(reviewResult);
@@ -211,5 +219,10 @@ public class QwenRuleReviewController {
          * 可选：审查立场
          */
         private String stance;
+
+        /**
+         * 【关键】可选：parseResultId - 用于后续批注时使用带锚点的文档
+         */
+        private String parseResultId;
     }
 }
