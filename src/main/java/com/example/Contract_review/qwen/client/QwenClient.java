@@ -75,6 +75,9 @@ public class QwenClient {
         request.setModel(request.getModel() != null ? request.getModel() : defaultModel);
         request.setStream(false);
 
+        // 增加 50% 的超时缓冲以防止 flatMap 内部操作超时
+        long totalTimeoutSeconds = Math.round(timeoutSeconds * 1.5);
+
         Mono<ChatResponse> responseMono = webClient.post()
                 .uri(baseUrl + "/chat/completions")
                 .header("Authorization", "Bearer " + apiKey)
@@ -84,6 +87,7 @@ public class QwenClient {
                 .bodyToMono(String.class)
                 .timeout(Duration.ofSeconds(timeoutSeconds))
                 .flatMap(this::parseNonStreamResponse)
+                .timeout(Duration.ofSeconds(totalTimeoutSeconds))  // 为 flatMap 添加额外超时
                 .doOnError(e -> logError(e, "Non-stream chat failed"));
 
         if (ENABLE_RETRY) {
