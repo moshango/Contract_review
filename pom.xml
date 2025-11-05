@@ -30,6 +30,24 @@
 		<java.version>17</java.version>
 	</properties>
 	<dependencies>
+    <!-- JWT for OnlyOffice token signing -->
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-api</artifactId>
+      <version>0.11.5</version>
+    </dependency>
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-impl</artifactId>
+      <version>0.11.5</version>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-jackson</artifactId>
+      <version>0.11.5</version>
+      <scope>runtime</scope>
+    </dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
@@ -81,24 +99,47 @@
 			<artifactId>jackson-databind</artifactId>
 		</dependency>
 
+		<!-- MinIO for object storage -->
+		<dependency>
+			<groupId>io.minio</groupId>
+			<artifactId>minio</artifactId>
+			<version>8.5.7</version>
+		</dependency>
+
 		<!-- SLF4J for logging -->
 		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-api</artifactId>
 		</dependency>
 
-		<!-- XML processing for OpenXML manipulation -->
-		<dependency>
-			<groupId>org.dom4j</groupId>
-			<artifactId>dom4j</artifactId>
-			<version>2.1.4</version>
-		</dependency>
-		<dependency>
-			<groupId>jaxen</groupId>
-			<artifactId>jaxen</artifactId>
-			<version>1.2.0</version>
-		</dependency>
-	</dependencies>
+	<!-- XML processing for OpenXML manipulation -->
+	<dependency>
+		<groupId>org.dom4j</groupId>
+		<artifactId>dom4j</artifactId>
+		<version>2.1.4</version>
+	</dependency>
+	<dependency>
+		<groupId>jaxen</groupId>
+		<artifactId>jaxen</artifactId>
+		<version>1.2.0</version>
+	</dependency>
+
+	<!-- Aspose Words for document processing -->
+	<dependency>
+		<groupId>com.aspose</groupId>
+		<artifactId>aspose-words</artifactId>
+		<version>24.12</version>
+		<classifier>jdk17</classifier>
+	</dependency>
+</dependencies>
+
+<repositories>
+	<repository>
+		<id>AsposeJavaAPI</id>
+		<name>Aspose Java API</name>
+		<url>https://releases.aspose.com/java/repo/</url>
+	</repository>
+</repositories>
 
 	<build>
 		<plugins>

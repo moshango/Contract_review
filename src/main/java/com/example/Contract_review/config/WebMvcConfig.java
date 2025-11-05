@@ -1,6 +1,7 @@
 package com.example.Contract_review.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.PathMatchConfigurer;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
@@ -42,5 +43,18 @@ public class WebMvcConfig implements WebMvcConfigurer {
     public void configurePathMatch(PathMatchConfigurer configurer) {
         // 确保 /api 路径能正确匹配到控制器
         configurer.setUseTrailingSlashMatch(true);
+    }
+
+    /**
+     * 配置CORS跨域支持
+     */
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/api/**")
+                .allowedOrigins("http://localhost:4000", "http://localhost:4001", "http://127.0.0.1:4000", "http://127.0.0.1:4001", "https://ai.matetrip.cn", "http://ai.matetrip.cn")
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                .allowedHeaders("*")
+                .allowCredentials(true)
+                .maxAge(3600);
     }
 }

@@ -1,0 +1,243 @@
+{
+  "info": {
+    "name": "合同审查系统-一键审查API",
+    "description": "一键审查功能完整API测试集合",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. 合同解析（获取甲乙方）",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": [],
+              "description": "上传.docx或.doc文件"
+            },
+            {
+              "key": "anchors",
+              "value": "generate",
+              "type": "text",
+              "description": "生成锚点"
+            },
+            {
+              "key": "returnMode",
+              "value": "json",
+              "type": "text",
+              "description": "返回JSON格式"
+            }
+          ]
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/parse",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "parse"]
+        },
+        "description": "解析合同文件，提取甲乙方信息和条款列表"
+      },
+      "response": [
+        {
+          "name": "成功示例",
+          "originalRequest": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/api/parse"
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"filename\": \"技术服务协议.docx\",\n  \"title\": \"技术服务协议\",\n  \"partyA\": \"广西商誉猫网络科技有限公司\",\n  \"partyB\": \"中国银联股份有限公司广西分公司\",\n  \"clauses\": [\n    {\n      \"id\": \"clause_1\",\n      \"anchorId\": \"anc-c1-hash\",\n      \"heading\": \"第一条 服务内容\",\n      \"fullText\": \"甲方委托乙方提供技术服务...\"\n    }\n  ],\n  \"meta\": {\n    \"wordCount\": 3500,\n    \"paragraphCount\": 45\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "2. 一键审查-甲方立场",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": [],
+              "description": "上传.docx或.doc文件"
+            },
+            {
+              "key": "stance",
+              "value": "A方",
+              "type": "text",
+              "description": "审查立场：A方（甲方视角）"
+            }
+          ]
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/qwen/rule-review/one-click-review",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "qwen", "rule-review", "one-click-review"]
+        },
+        "description": "从甲方视角进行完整的合同审查"
+      },
+      "response": [
+        {
+          "name": "成功示例",
+          "originalRequest": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/api/qwen/rule-review/one-click-review"
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"success\": true,\n  \"message\": \"合同审查完成\",\n  \"filename\": \"技术服务协议_一键审查_A方_20251103_145030.docx\",\n  \"fileSize\": 245678,\n  \"issuesCount\": 5,\n  \"processingTime\": 8234,\n  \"minioUrl\": \"http://127.0.0.1:9000/contract-review/reports/技术服务协议_一键审查_A方.docx\",\n  \"originalUrl\": \"http://127.0.0.1:9000/contract-review/contracts/技术服务协议.docx\",\n  \"savedToMinio\": true\n}"
+        }
+      ]
+    },
+    {
+      "name": "3. 一键审查-乙方立场",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": []
+            },
+            {
+              "key": "stance",
+              "value": "B方",
+              "type": "text",
+              "description": "审查立场：B方（乙方视角）"
+            }
+          ]
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/qwen/rule-review/one-click-review",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "qwen", "rule-review", "one-click-review"]
+        },
+        "description": "从乙方视角进行完整的合同审查"
+      }
+    },
+    {
+      "name": "4. 一键审查-中立立场",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": []
+            },
+            {
+              "key": "stance",
+              "value": "neutral",
+              "type": "text",
+              "description": "审查立场：neutral（中立客观）"
+            }
+          ]
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/qwen/rule-review/one-click-review",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "qwen", "rule-review", "one-click-review"]
+        },
+        "description": "以中立角度进行客观全面的合同审查"
+      }
+    },
+    {
+      "name": "5. 检查Qwen服务状态",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/qwen/rule-review/status",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "qwen", "rule-review", "status"]
+        },
+        "description": "检查后端Qwen AI服务是否可用"
+      },
+      "response": [
+        {
+          "name": "成功示例",
+          "originalRequest": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:8080/api/qwen/rule-review/status"
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"success\": true,\n  \"qwenAvailable\": true,\n  \"message\": \"✓ Qwen服务已就绪\",\n  \"config\": {\n    \"model\": \"qwen-max-latest\",\n    \"hasApiKey\": true,\n    \"hasBaseUrl\": true\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "6. 文件代理下载",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/preview/proxy?fileName=reports/test.docx",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "preview", "proxy"],
+          "query": [
+            {
+              "key": "fileName",
+              "value": "reports/test.docx",
+              "description": "MinIO中的对象名（不含bucket）"
+            }
+          ]
+        },
+        "description": "通过后端代理下载MinIO中的文件（避免跨域）"
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    }
+  ]
+}
+

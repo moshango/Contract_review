@@ -11,11 +11,13 @@ import org.dom4j.DocumentHelper;
 import org.dom4j.Element;
 import org.dom4j.Namespace;
 import org.dom4j.QName;
+import org.dom4j.io.OutputFormat;
 import org.dom4j.io.SAXReader;
 import org.dom4j.io.XMLWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.apache.poi.openxml4j.util.ZipSecureFile;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -118,6 +120,18 @@ public class WordXmlCommentProcessor {
 
     private static final Logger logger = LoggerFactory.getLogger(WordXmlCommentProcessor.class);
 
+    static {
+        try {
+            double newRatio = 0.0001d;
+            ZipSecureFile.setMinInflateRatio(newRatio);
+            LoggerFactory.getLogger(WordXmlCommentProcessor.class)
+                .info("ZipSecureFile inflate ratio lowered to {} to allow embedded fonts", newRatio);
+        } catch (Exception e) {
+            LoggerFactory.getLogger(WordXmlCommentProcessor.class)
+                .warn("Failed to adjust ZipSecureFile min inflate ratio", e);
+        }
+    }
+
     // OpenXML命名空间
     private static final Namespace W_NS = Namespace.get("w", "http://schemas.openxmlformats.org/wordprocessingml/2006/main");
     private static final Namespace R_NS = Namespace.get("r", "http://schemas.openxmlformats.org/officeDocument/2006/relationships");
@@ -130,6 +144,17 @@ public class WordXmlCommentProcessor {
 
     public WordXmlCommentProcessor(PreciseTextAnnotationLocator preciseLocator) {
         this.preciseLocator = preciseLocator;
+    }
+
+    /**
+     * 创建XML输出格式配置
+     */
+    private OutputFormat createOutputFormat() {
+        OutputFormat format = OutputFormat.createPrettyPrint();
+        format.setEncoding("UTF-8");
+        format.setOmitEncoding(false);
+        format.setSuppressDeclaration(false);
+        return format;
     }
 
     /**
@@ -206,14 +231,193 @@ public class WordXmlCommentProcessor {
 
             // 保存修改后的XML
             saveDocumentXml(opcPackage, documentXml);
+
+            // 【维测】document.xml保存后验证批注标记
+            Element documentRoot = documentXml.getRootElement();
+            Element body = documentRoot.element(QName.get("body", W_NS));
+
+            // 【关键修复】使用递归查找所有段落中的批注标记，而不是只查直接子元素
+            List<Element> allCommentRangeStarts = findAllElementsRecursive(body, QName.get("commentRangeStart", W_NS));
+            List<Element> allCommentRangeEnds = findAllElementsRecursive(body, QName.get("commentRangeEnd", W_NS));
+            List<Element> allCommentRefs = findAllElementsRecursive(body, QName.get("commentReference", W_NS));
+
+            logger.info("【维测】document.xml保存后诊断：commentRangeStart数量={}, commentRangeEnd数量={}, commentReference数量={}",
+                       allCommentRangeStarts.size(), allCommentRangeEnds.size(), allCommentRefs.size());
+
+            // 列出所有批注ID
+            List<String> startIds = allCommentRangeStarts.stream()
+                .map(e -> e.attributeValue(QName.get("id", W_NS)))
+                .toList();
+            List<String> endIds = allCommentRangeEnds.stream()
+                .map(e -> e.attributeValue(QName.get("id", W_NS)))
+                .toList();
+            List<String> refIds = allCommentRefs.stream()
+                .map(e -> e.attributeValue(QName.get("id", W_NS)))
+                .toList();
+
+            logger.debug("【维测】commentRangeStart IDs: {}", startIds);
+            logger.debug("【维测】commentRangeEnd IDs: {}", endIds);
+            logger.debug("【维测】commentReference IDs: {}", refIds);
+
+            // 【维测】保存前输出comments.xml的结构和内容
+            Element commentsRoot = commentsXml.getRootElement();
+            List<Element> comments = commentsRoot.elements(QName.get("comment", W_NS));
+            logger.info("【维测】保存comments.xml前诊断：根元素={}, 批注数量={}, 已添加批注ID={}",
+                       commentsRoot.getName(), comments.size(),
+                       comments.stream().map(c -> c.attributeValue(QName.get("id", W_NS))).toList());
+
+            // 输出每个批注的内容（前100字）
+            for (Element comment : comments) {
+                String commentId = comment.attributeValue(QName.get("id", W_NS));
+                String commentContent = comment.asXML();
+                int contentLen = commentContent.length();
+                String preview = contentLen > 100 ? commentContent.substring(0, 100) + "..." : commentContent;
+                logger.debug("【维测】批注ID={}, 内容预览(总长度={}): {}", commentId, contentLen, preview);
+            }
+
             saveCommentsXml(opcPackage, commentsXml);
+
+            // 【维测】保存后验证
+            logger.info("【维测】comments.xml保存后验证：文件是否存在于OPCPackage中");
+            try {
+                PackagePartName commentsPartName = PackagingURIHelper.createPartName("/word/comments.xml");
+                PackagePart commentsPart = opcPackage.getPart(commentsPartName);
+                if (commentsPart != null) {
+                    long partSize = commentsPart.getSize();
+                    logger.info("【维测】comments.xml在OPCPackage中，大小: {} 字节", partSize);
+                } else {
+                    logger.error("【维测】❌ ERROR: comments.xml在OPCPackage中为null!");
+                }
+            } catch (Exception e) {
+                logger.error("【维测】❌ ERROR: 验证comments.xml时异常: {}", e.getMessage());
+            }
 
             // 更新关系文件
             updateDocumentRels(opcPackage);
 
+            // 【关键修复4】保存前验证关键文件
+            logger.info("【维测】OPCPackage保存前诊断：");
+            try {
+                // 验证 document.xml.rels 是否包含 comments 关系
+                PackagePartName relsPartName = PackagingURIHelper.createPartName("/word/_rels/document.xml.rels");
+                PackagePart relsPart = opcPackage.getPart(relsPartName);
+                if (relsPart != null) {
+                    SAXReader reader = new SAXReader();
+                    Document relsDoc = reader.read(relsPart.getInputStream());
+                    Element relationships = relsDoc.getRootElement();
+                    
+                    boolean hasComments = false;
+                    for (Element rel : relationships.elements()) {
+                        String target = rel.attributeValue("Target");
+                        if ("comments.xml".equals(target)) {
+                            hasComments = true;
+                            String relId = rel.attributeValue("Id");
+                            logger.info("【维测】✓ 保存前验证：document.xml.rels包含comments关系 (Id={})", relId);
+                            break;
+                        }
+                    }
+                    
+                    if (!hasComments) {
+                        logger.error("【维测】❌ ERROR: 保存前验证失败：document.xml.rels不包含comments关系！");
+                        // 紧急修复：尝试再次添加
+                        logger.warn("【维测】尝试紧急修复：重新添加comments关系...");
+                        updateDocumentRels(opcPackage);
+                    }
+                } else {
+                    logger.error("【维测】❌ ERROR: 保存前验证：document.xml.rels为null!");
+                }
+            } catch (Exception preSaveEx) {
+                logger.error("【维测】❌ ERROR: 保存前验证失败: {}", preSaveEx.getMessage());
+            }
+
+            // 【关键修复6】在保存前读取 document.xml.rels 的字节数组
+            byte[] relsBytes = null;
+            try {
+                PackagePartName relsPartName = PackagingURIHelper.createPartName("/word/_rels/document.xml.rels");
+                PackagePart relsPart = opcPackage.getPart(relsPartName);
+                try (java.io.InputStream is = relsPart.getInputStream()) {
+                    relsBytes = is.readAllBytes();
+                    logger.info("【维测】✓ 读取 document.xml.rels 成功，大小: {} 字节", relsBytes.length);
+                }
+            } catch (Exception e) {
+                logger.error("【维测】❌ ERROR: 无法读取 document.xml.rels: {}", e.getMessage());
+            }
+
             // 输出修改后的DOCX
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-            opcPackage.save(outputStream);
+            try {
+                opcPackage.save(outputStream);
+                logger.debug("OPCPackage保存成功，大小: {} 字节", outputStream.size());
+
+                // 【关键修复7】如果 ZIP 中缺少 document.xml.rels，手动添加
+                if (relsBytes != null) {
+                    try {
+                        byte[] originalZipBytes = outputStream.toByteArray();
+                        logger.debug("【维测】修复前ZIP大小: {} 字节", originalZipBytes.length);
+                        
+                        byte[] fixedZip = manuallyAddRelsToZip(originalZipBytes, relsBytes);
+                        logger.debug("【维测】修复后ZIP大小: {} 字节", fixedZip.length);
+                        
+                        // 直接替换 outputStream 的内容
+                        outputStream.reset();
+                        outputStream.write(fixedZip);
+                        outputStream.flush();
+                        
+                        logger.info("【维测】✓ 手动修复 ZIP 文件成功");
+                    } catch (Exception fixEx) {
+                        logger.error("【维测】❌ ERROR: 手动修复失败: {}", fixEx.getMessage(), fixEx);
+                    }
+                }
+
+                // 【关键修复5】验证保存后的ZIP文件内容
+                logger.info("【维测】OPCPackage保存后诊断：");
+                try {
+                    // 验证保存后的ZIP文件是否包含关键文件
+                    java.util.zip.ZipInputStream zipIn = new java.util.zip.ZipInputStream(
+                        new java.io.ByteArrayInputStream(outputStream.toByteArray())
+                    );
+                    java.util.zip.ZipEntry entry;
+                    boolean hasRels = false;
+                    boolean hasComments = false;
+                    int relsSize = 0;
+                    
+                    while ((entry = zipIn.getNextEntry()) != null) {
+                        if ("word/_rels/document.xml.rels".equals(entry.getName())) {
+                            hasRels = true;
+                            relsSize = (int) entry.getSize();
+                        }
+                        if ("word/comments.xml".equals(entry.getName())) {
+                            hasComments = true;
+                        }
+                    }
+                    zipIn.close();
+                    
+                    logger.info("【维测】✓ ZIP文件验证：hasRels={}, hasComments={}, relsSize={}字节", 
+                                hasRels, hasComments, relsSize);
+                    
+                    if (!hasRels) {
+                        logger.error("【维测】❌ ERROR: ZIP文件中缺少 document.xml.rels！");
+                    } else if (!hasComments) {
+                        logger.error("【维测】❌ ERROR: ZIP文件中缺少 comments.xml！");
+                    } else {
+                        logger.info("【维测】✓ ZIP文件结构验证通过");
+                    }
+                } catch (Exception zipEx) {
+                    logger.error("【维测】❌ ERROR: ZIP验证失败: {}", zipEx.getMessage());
+                }
+
+            } finally {
+                // 【关键修复】必须关闭OPCPackage，确保所有缓冲区完全刷新
+                // 这对长文档特别重要，否则comments.xml可能无法完全写入
+                if (opcPackage != null) {
+                    try {
+                        opcPackage.close();
+                        logger.debug("OPCPackage已关闭");
+                    } catch (Exception closeEx) {
+                        logger.warn("关闭OPCPackage时出错", closeEx);
+                    }
+                }
+            }
 
             logger.info("XML批注处理完成：成功添加{}个批注，失败{}个", addedCount, failedCount);
             return outputStream.toByteArray();
@@ -556,6 +760,30 @@ public class WordXmlCommentProcessor {
     }
 
     /**
+     * 递归查找所有指定名称的元素（包括嵌套在其他元素中的）
+     */
+    private List<Element> findAllElementsRecursive(Element element, QName targetQName) {
+        List<Element> results = new ArrayList<>();
+        collectElementsRecursive(element, targetQName, results);
+        return results;
+    }
+
+    /**
+     * 递归收集指定元素的辅助方法
+     */
+    private void collectElementsRecursive(Element element, QName targetQName, List<Element> results) {
+        // 如果当前元素匹配，添加到列表
+        if (targetQName.equals(element.getQName())) {
+            results.add(element);
+        }
+
+        // 递归查找子元素
+        for (Element child : element.elements()) {
+            collectElementsRecursive(child, targetQName, results);
+        }
+    }
+
+    /**
      * 递归收集段落的辅助方法
      *
      * @param element 当前元素
@@ -871,11 +1099,15 @@ public class WordXmlCommentProcessor {
             if (!prefix.isEmpty()) {
                 prefixRun = new org.dom4j.tree.DefaultElement(QName.get("r", W_NS));
                 if (originalRunProperties != null) {
-                    // 复制Run的格式属性到前缀Run
+                    // 【修复】使用clone()深度克隆格式属性，先创建rPr容器
+                    Element prefixRPr = prefixRun.addElement(QName.get("rPr", W_NS));
                     List<Element> propChildren = originalRunProperties.elements();
+                    int copiedCount = 0;
                     for (Element propChild : propChildren) {
-                        prefixRun.add(propChild.createCopy());
+                        prefixRPr.add((Element) propChild.clone());  // 使用clone()深度克隆
+                        copiedCount++;
                     }
+                    logger.debug("前缀Run格式属性克隆完成：复制了 {} 个属性", copiedCount);
                 }
                 Element prefixText = prefixRun.addElement(QName.get("t", W_NS));
                 prefixText.setText(prefix);
@@ -889,7 +1121,7 @@ public class WordXmlCommentProcessor {
             Element commentRangeStart = new org.dom4j.tree.DefaultElement(QName.get("commentRangeStart", W_NS));
             commentRangeStart.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
             paragraph.elements().add(runIndex, commentRangeStart);
-            runIndex++;
+            runIndex++;  // 现在runIndex指向commentRangeStart，originalRun在runIndex+1
             logger.debug("插入commentRangeStart");
 
             // Step 3: 创建匹配Run（修改原Run的文本内容）
@@ -906,41 +1138,59 @@ public class WordXmlCommentProcessor {
             logger.debug("修改原Run文本为匹配部分：'{}'", matched.length() > 30 ? matched.substring(0, 30) + "..." : matched);
 
             // Step 4: 在匹配部分后插入commentRangeEnd
-            // 重新获取originalRun的位置（因为已经添加了元素）
-            allElements = paragraph.elements();
-            int originalRunNewIndex = allElements.indexOf(originalRun);
-
+            // 【关键修复】在originalRun之后插入commentRangeEnd
+            // 现在 originalRun 在 runIndex + 1 的位置
             Element commentRangeEnd = new org.dom4j.tree.DefaultElement(QName.get("commentRangeEnd", W_NS));
             commentRangeEnd.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
-            paragraph.elements().add(originalRunNewIndex + 1, commentRangeEnd);
+            // originalRun在段落中的位置是runIndex+1，所以commentRangeEnd应该在runIndex+2
+            paragraph.elements().add(runIndex + 2, commentRangeEnd);
+            runIndex = runIndex + 2;  // 更新runIndex指向commentRangeEnd
             logger.debug("插入commentRangeEnd");
 
             // Step 5: 创建后缀Run（如果有）
             if (!suffix.isEmpty()) {
                 Element suffixRun = new org.dom4j.tree.DefaultElement(QName.get("r", W_NS));
                 if (originalRunProperties != null) {
-                    // 复制Run的格式属性到后缀Run
+                    // 【修复】使用clone()深度克隆格式属性，先创建rPr容器
+                    Element suffixRPr = suffixRun.addElement(QName.get("rPr", W_NS));
                     List<Element> propChildren = originalRunProperties.elements();
+                    int copiedCount = 0;
                     for (Element propChild : propChildren) {
-                        suffixRun.add(propChild.createCopy());
+                        suffixRPr.add((Element) propChild.clone());  // 使用clone()深度克隆
+                        copiedCount++;
                     }
+                    logger.debug("后缀Run格式属性克隆完成：复制了 {} 个属性", copiedCount);
                 }
                 Element suffixText = suffixRun.addElement(QName.get("t", W_NS));
                 suffixText.setText(suffix);
                 suffixText.addAttribute("xml:space", "preserve");
 
                 // 在commentRangeEnd后插入suffixRun
-                allElements = paragraph.elements();
-                int commentRangeEndIndex = allElements.indexOf(commentRangeEnd);
-                paragraph.elements().add(commentRangeEndIndex + 1, suffixRun);
+                paragraph.elements().add(runIndex + 1, suffixRun);
+                runIndex++;  // suffixRun占据了一个位置
                 logger.debug("创建后缀Run：'{}'", suffix.length() > 30 ? suffix.substring(0, 30) + "..." : suffix);
             }
 
-            // Step 6: 添加批注引用
+            // Step 6: 添加批注引用（必须在commentRangeEnd之后）
             Element commentRefRun = new org.dom4j.tree.DefaultElement(QName.get("r", W_NS));
+            if (originalRunProperties != null) {
+                // 【修复】使用clone()深度克隆格式属性，先创建rPr容器
+                Element commentRefRPr = commentRefRun.addElement(QName.get("rPr", W_NS));
+                List<Element> propChildren = originalRunProperties.elements();
+                int copiedCount = 0;
+                for (Element propChild : propChildren) {
+                    commentRefRPr.add((Element) propChild.clone());  // 使用clone()深度克隆
+                    copiedCount++;
+                }
+                logger.debug("批注引用Run格式属性克隆完成：复制了 {} 个属性", copiedCount);
+            }
             Element commentReference = commentRefRun.addElement(QName.get("commentReference", W_NS));
             commentReference.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
-            paragraph.elements().add(commentRefRun);
+
+            // 在commentRangeEnd之后添加commentReference
+            // 【关键修复】继续使用runIndex，避免再次调用indexOf()
+            paragraph.elements().add(runIndex + 1, commentRefRun);
+            logger.debug("插入commentReference");
 
             logger.info("✓ 精确批注插入完成：commentId={}, 前缀={}, 匹配范围={}-{}, 后缀={}",
                        commentId,
@@ -963,21 +1213,125 @@ public class WordXmlCommentProcessor {
         // 创建批注元素
         Element comment = commentsRoot.addElement(QName.get("comment", W_NS));
         comment.addAttribute(QName.get("id", W_NS), String.valueOf(commentId));
-        comment.addAttribute(QName.get("author", W_NS), "AI Review Assistant");
+        comment.addAttribute(QName.get("author", W_NS), "AI审查助手");
         comment.addAttribute(QName.get("date", W_NS), new Date().toString());
         comment.addAttribute(QName.get("initials", W_NS), "AI");
 
-        // 创建批注内容段落
-        Element commentPara = comment.addElement(QName.get("p", W_NS));
-        Element commentRun = commentPara.addElement(QName.get("r", W_NS));
-        Element commentText = commentRun.addElement(QName.get("t", W_NS));
+        // 【新格式】使用富文本格式，关键词加粗并换行显示
+        // 直接在comment下创建多个独立段落，不使用初始段落
+        addFormattedCommentContent(comment, issue);
 
-        // 格式化批注文本
-        String formattedComment = formatCommentText(issue);
-        commentText.setText(formattedComment);
+        logger.debug("在comments.xml中添加批注内容：commentId={}, 风险等级={}, 类别={}",
+                    commentId, issue.getSeverity(), issue.getCategory());
+    }
 
-        logger.debug("在comments.xml中添加批注内容：commentId={}, 内容长度={}",
-                    commentId, formattedComment.length());
+    /**
+     * 添加格式化的批注内容（支持加粗和换行）
+     * 【修复】每个部分使用独立段落，关键词和内容在同一段落，不立即换行
+     * @param comment 批注元素（w:comment），将在此元素下直接创建段落
+     */
+    private void addFormattedCommentContent(Element comment, ReviewIssue issue) {
+        String severityLabel = getSeverityLabel(issue.getSeverity());
+        
+        // 1. 风险等级段落（独立段落）
+        // 格式：风险等级：高风险（关键词加粗，值不加粗，在同一段落）
+        Element riskPara = comment.addElement(QName.get("p", W_NS));
+        
+        // 关键词（加粗）
+        Element run1 = riskPara.addElement(QName.get("r", W_NS));
+        Element rPr1 = run1.addElement(QName.get("rPr", W_NS));
+        // 添加完整字体设置（确保加粗效果）
+        Element fonts1 = rPr1.addElement(QName.get("rFonts", W_NS));
+        fonts1.addAttribute(QName.get("ascii", W_NS), "Arial");
+        fonts1.addAttribute(QName.get("hAnsi", W_NS), "Arial");
+        fonts1.addAttribute(QName.get("eastAsia", W_NS), "Arial");
+        fonts1.addAttribute(QName.get("cs", W_NS), "Arial");
+        rPr1.addElement(QName.get("b", W_NS)); // 加粗
+        rPr1.addElement(QName.get("bCs", W_NS)); // 复杂脚本加粗
+        Element sz1 = rPr1.addElement(QName.get("sz", W_NS));
+        sz1.addAttribute(QName.get("val", W_NS), "22");
+        Element text1 = run1.addElement(QName.get("t", W_NS));
+        text1.addAttribute("xml:space", "preserve");
+        text1.setText("风险等级：");
+        
+        // 风险等级值（不加粗，在同一段落）
+        Element run2 = riskPara.addElement(QName.get("r", W_NS));
+        Element text2 = run2.addElement(QName.get("t", W_NS));
+        text2.addAttribute("xml:space", "preserve");
+        text2.setText(severityLabel);
+        
+        // 2. 问题类别段落（独立段落，如果存在）
+        if (issue.getCategory() != null) {
+            Element categoryPara = comment.addElement(QName.get("p", W_NS));
+            
+            // 构建完整的类别文本（如"违约条款问题："）
+            String categoryText = issue.getCategory();
+            if (!categoryText.endsWith("问题") && !categoryText.endsWith("问题：")) {
+                categoryText = categoryText + "问题：";
+            } else if (!categoryText.endsWith("：")) {
+                categoryText = categoryText + "：";
+            }
+            
+            // 关键词（加粗）
+            Element run3 = categoryPara.addElement(QName.get("r", W_NS));
+            Element rPr3 = run3.addElement(QName.get("rPr", W_NS));
+            // 添加完整字体设置（确保加粗效果）
+            Element fonts3 = rPr3.addElement(QName.get("rFonts", W_NS));
+            fonts3.addAttribute(QName.get("ascii", W_NS), "Arial");
+            fonts3.addAttribute(QName.get("hAnsi", W_NS), "Arial");
+            fonts3.addAttribute(QName.get("eastAsia", W_NS), "Arial");
+            fonts3.addAttribute(QName.get("cs", W_NS), "Arial");
+            rPr3.addElement(QName.get("b", W_NS)); // 加粗
+            rPr3.addElement(QName.get("bCs", W_NS)); // 复杂脚本加粗
+            Element sz3 = rPr3.addElement(QName.get("sz", W_NS));
+            sz3.addAttribute(QName.get("val", W_NS), "22");
+            Element text3 = run3.addElement(QName.get("t", W_NS));
+            text3.addAttribute("xml:space", "preserve");
+            text3.setText(categoryText);
+            
+            // 问题描述（不加粗，在同一段落）
+            if (issue.getFinding() != null && !issue.getFinding().isEmpty()) {
+                Element run4 = categoryPara.addElement(QName.get("r", W_NS));
+                Element text4 = run4.addElement(QName.get("t", W_NS));
+                text4.addAttribute("xml:space", "preserve");
+                text4.setText(issue.getFinding());
+            }
+        } else if (issue.getFinding() != null && !issue.getFinding().isEmpty()) {
+            // 如果没有类别，单独显示问题描述段落
+            Element findingPara = comment.addElement(QName.get("p", W_NS));
+            Element run5 = findingPara.addElement(QName.get("r", W_NS));
+            Element text5 = run5.addElement(QName.get("t", W_NS));
+            text5.addAttribute("xml:space", "preserve");
+            text5.setText(issue.getFinding());
+        }
+        
+        // 3. 建议段落（独立段落，如果存在）
+        if (issue.getSuggestion() != null && !issue.getSuggestion().isEmpty()) {
+            Element suggestionPara = comment.addElement(QName.get("p", W_NS));
+            
+            // 关键词（加粗）
+            Element run6 = suggestionPara.addElement(QName.get("r", W_NS));
+            Element rPr6 = run6.addElement(QName.get("rPr", W_NS));
+            // 添加完整字体设置（确保加粗效果）
+            Element fonts6 = rPr6.addElement(QName.get("rFonts", W_NS));
+            fonts6.addAttribute(QName.get("ascii", W_NS), "Arial");
+            fonts6.addAttribute(QName.get("hAnsi", W_NS), "Arial");
+            fonts6.addAttribute(QName.get("eastAsia", W_NS), "Arial");
+            fonts6.addAttribute(QName.get("cs", W_NS), "Arial");
+            rPr6.addElement(QName.get("b", W_NS)); // 加粗
+            rPr6.addElement(QName.get("bCs", W_NS)); // 复杂脚本加粗
+            Element sz6 = rPr6.addElement(QName.get("sz", W_NS));
+            sz6.addAttribute(QName.get("val", W_NS), "22");
+            Element text6 = run6.addElement(QName.get("t", W_NS));
+            text6.addAttribute("xml:space", "preserve");
+            text6.setText("建议：");
+            
+            // 建议内容（不加粗，在同一段落）
+            Element run7 = suggestionPara.addElement(QName.get("r", W_NS));
+            Element text7 = run7.addElement(QName.get("t", W_NS));
+            text7.addAttribute("xml:space", "preserve");
+            text7.setText(issue.getSuggestion());
+        }
     }
 
     /**
@@ -1068,7 +1422,7 @@ public class WordXmlCommentProcessor {
         PackagePart documentPart = opcPackage.getPart(documentPartName);
 
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        XMLWriter writer = new XMLWriter(outputStream);
+        XMLWriter writer = new XMLWriter(outputStream, createOutputFormat());
         writer.write(documentXml);
         writer.close();
 
@@ -1091,14 +1445,20 @@ public class WordXmlCommentProcessor {
         try {
             commentsPart = opcPackage.getPart(commentsPartName);
         } catch (Exception e) {
-            // 如果comments.xml不存在，创建新的part
-            commentsPart = opcPackage.createPart(commentsPartName,
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml");
+            commentsPart = null; // 统一在下面进行创建
+        }
+
+        // 兼容某些实现：getPart() 可能返回 null 而不抛异常
+        if (commentsPart == null) {
+            commentsPart = opcPackage.createPart(
+                commentsPartName,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
+            );
             logger.info("创建新的comments.xml文件");
         }
 
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        XMLWriter writer = new XMLWriter(outputStream);
+        XMLWriter writer = new XMLWriter(outputStream, createOutputFormat());
         writer.write(commentsXml);
         writer.close();
 
@@ -1111,15 +1471,21 @@ public class WordXmlCommentProcessor {
         logger.debug("comments.xml保存完成，大小: {} 字节", outputStream.size());
     }
 
-    /**
-     * 更新document.xml.rels关系文件
-     */
     private void updateDocumentRels(OPCPackage opcPackage) throws Exception {
         PackagePartName relsPartName = PackagingURIHelper.createPartName("/word/_rels/document.xml.rels");
 
+        // 【关键修复1】先检查并确保 rels 文件存在
+        PackagePart relsPart;
         try {
-            PackagePart relsPart = opcPackage.getPart(relsPartName);
+            relsPart = opcPackage.getPart(relsPartName);
+        } catch (Exception e) {
+            // 如果不存在，先创建一个基本的 rels 文件
+            logger.info("document.xml.rels不存在，先创建基本文件");
+            createBasicDocumentRels(opcPackage);
+            relsPart = opcPackage.getPart(relsPartName);
+        }
 
+        try {
             // 读取现有关系
             SAXReader reader = new SAXReader();
             Document relsDoc = reader.read(relsPart.getInputStream());
@@ -1146,26 +1512,156 @@ public class WordXmlCommentProcessor {
 
                 // 保存更新后的关系文件
                 ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-                XMLWriter writer = new XMLWriter(outputStream);
+                XMLWriter writer = new XMLWriter(outputStream, createOutputFormat());
                 writer.write(relsDoc);
                 writer.close();
 
-                // 清空现有内容并写入新内容
+                // 【关键修复】清空现有内容并写入新内容
+                byte[] relsBytes = outputStream.toByteArray();
                 try (var partStream = relsPart.getOutputStream()) {
-                    partStream.write(outputStream.toByteArray());
+                    partStream.write(relsBytes);
                     partStream.flush();
                 }
 
-                logger.debug("添加comments关系到document.xml.rels，大小: {} 字节", outputStream.size());
+                logger.debug("添加comments关系到document.xml.rels，大小: {} 字节", relsBytes.length);
+                logger.info("【维测】已添加comments关系到document.xml.rels");
+                
+                // 【关键修复】立即验证写入是否成功
+                try {
+                    SAXReader verifyReader = new SAXReader();
+                    try (java.io.ByteArrayInputStream verifyStream = new java.io.ByteArrayInputStream(relsBytes)) {
+                        Document verifyDoc = verifyReader.read(verifyStream);
+                        Element verifyRelationships = verifyDoc.getRootElement();
+                        logger.debug("【维测】验证读取成功，开始遍历 {} 个关系", verifyRelationships.elements().size());
+
+                        boolean hasCommentsAfter = false;
+                        for (Element rel : verifyRelationships.elements()) {
+                            String target = rel.attributeValue("Target");
+                            String relId = rel.attributeValue("Id");
+                            logger.debug("【维测】验证遍历: Id={}, Target={}", relId, target);
+                            if ("comments.xml".equals(target)) {
+                                hasCommentsAfter = true;
+                                logger.info("【维测】✓ 验证通过：comments关系已写入");
+                                break;
+                            }
+                        }
+                        if (!hasCommentsAfter) {
+                            logger.error("【维测】❌ ERROR: 验证失败：comments关系写入后仍然不存在！");
+                            logger.error("【维测】已写入的内容前200字符: {}", new String(relsBytes, 0, Math.min(200, relsBytes.length)));
+                        }
+                    }
+                } catch (Exception verifyEx) {
+                    logger.error("【维测】❌ ERROR: 验证时出错: {}", verifyEx.getMessage(), verifyEx);
+                }
             } else {
                 logger.debug("comments关系已存在，跳过添加");
+                logger.info("【维测】comments关系已存在于document.xml.rels中");
+            }
+
+            // 【维测】验证关系是否正确写入
+            List<Element> allRels = relationships.elements();
+            logger.info("【维测】document.xml.rels中总关系数: {}", allRels.size());
+            for (Element rel : allRels) {
+                String relId = rel.attributeValue("Id");
+                String relTarget = rel.attributeValue("Target");
+                logger.debug("【维测】关系: Id={}, Target={}", relId, relTarget);
             }
 
         } catch (Exception e) {
             logger.warn("更新document.xml.rels失败：{}", e.getMessage());
-            // 创建基本的关系文件
-            createBasicDocumentRels(opcPackage);
+            logger.error("【维测】❌ ERROR: 更新document.xml.rels异常: {}", e.getMessage(), e);
+
+            // 【关键修复】不要完全重新创建rels文件，而是尝试保留原有关系
+            logger.warn("尝试恢复document.xml.rels...");
+            try {
+                recoverOrCreateDocumentRels(opcPackage);
+            } catch (Exception recoveryEx) {
+                logger.error("恢复失败，最后尝试创建基本关系文件", recoveryEx);
+                createBasicDocumentRels(opcPackage);
+            }
         }
+    }
+
+    /**
+     * 尝试恢复或创建document.xml.rels，保留原有关系
+     */
+    private void recoverOrCreateDocumentRels(OPCPackage opcPackage) throws Exception {
+        PackagePartName relsPartName = PackagingURIHelper.createPartName("/word/_rels/document.xml.rels");
+
+        PackagePart relsPart = null;
+        Document relsDoc = null;
+
+        try {
+            // 尝试获取现有的rels
+            relsPart = opcPackage.getPart(relsPartName);
+            if (relsPart != null) {
+                SAXReader reader = new SAXReader();
+                relsDoc = reader.read(relsPart.getInputStream());
+                logger.debug("【维测】成功恢复现有document.xml.rels");
+            }
+        } catch (Exception e) {
+            logger.debug("【维测】现有document.xml.rels无法读取，将创建新文件");
+        }
+
+        // 如果无法读取现有文件，创建新的
+        if (relsDoc == null) {
+            relsDoc = DocumentHelper.createDocument();
+            Element relationships = relsDoc.addElement("Relationships");
+            relationships.addNamespace("", "http://schemas.openxmlformats.org/package/2006/relationships");
+
+            // 【关键修复】添加基本的必需关系
+            addBasicRelationships(relationships);
+
+            logger.debug("【维测】创建了新的document.xml.rels");
+        }
+
+        // 确保有comments关系
+        Element relationships = relsDoc.getRootElement();
+        boolean hasCommentsRel = false;
+        for (Element rel : relationships.elements()) {
+            String target = rel.attributeValue("Target");
+            if ("comments.xml".equals(target)) {
+                hasCommentsRel = true;
+                break;
+            }
+        }
+
+        if (!hasCommentsRel) {
+            Element commentsRel = relationships.addElement("Relationship");
+            commentsRel.addAttribute("Id", "rComments");
+            commentsRel.addAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments");
+            commentsRel.addAttribute("Target", "comments.xml");
+            logger.debug("【维测】添加了comments关系");
+        }
+
+        // 保存或创建rels文件
+        if (relsPart == null) {
+            relsPart = opcPackage.createPart(relsPartName, "application/vnd.openxmlformats-package.relationships+xml");
+            logger.debug("【维测】创建了新的PackagePart");
+        }
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        XMLWriter writer = new XMLWriter(outputStream, createOutputFormat());
+        writer.write(relsDoc);
+        writer.close();
+
+        try (var partStream = relsPart.getOutputStream()) {
+            partStream.write(outputStream.toByteArray());
+            partStream.flush();
+        }
+
+        logger.info("【维测】document.xml.rels恢复/创建成功，大小: {} 字节", outputStream.size());
+    }
+
+    /**
+     * 添加基本的必需关系
+     */
+    private void addBasicRelationships(Element relationships) {
+        // 添加styles关系（几乎所有Word文档都需要）
+        Element stylesRel = relationships.addElement("Relationship");
+        stylesRel.addAttribute("Id", "rId1");
+        stylesRel.addAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles");
+        stylesRel.addAttribute("Target", "styles.xml");
     }
 
     /**
@@ -1179,17 +1675,55 @@ public class WordXmlCommentProcessor {
         Element relationships = relsDoc.addElement("Relationships");
         relationships.addNamespace("", "http://schemas.openxmlformats.org/package/2006/relationships");
 
-        // 添加comments关系
+        // 【关键修复2】添加所有必需的基本关系
+        // 1. styles 关系（几乎所有Word文档都需要）
+        Element stylesRel = relationships.addElement("Relationship");
+        stylesRel.addAttribute("Id", "rId1");
+        stylesRel.addAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles");
+        stylesRel.addAttribute("Target", "styles.xml");
+
+        // 2. settings 关系
+        Element settingsRel = relationships.addElement("Relationship");
+        settingsRel.addAttribute("Id", "rId2");
+        settingsRel.addAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings");
+        settingsRel.addAttribute("Target", "settings.xml");
+
+        // 3. numbering 关系
+        Element numberingRel = relationships.addElement("Relationship");
+        numberingRel.addAttribute("Id", "rId3");
+        numberingRel.addAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering");
+        numberingRel.addAttribute("Target", "numbering.xml");
+
+        // 4. fontTable 关系
+        Element fontTableRel = relationships.addElement("Relationship");
+        fontTableRel.addAttribute("Id", "rId4");
+        fontTableRel.addAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable");
+        fontTableRel.addAttribute("Target", "fontTable.xml");
+
+        // 5. theme 关系
+        Element themeRel = relationships.addElement("Relationship");
+        themeRel.addAttribute("Id", "rId5");
+        themeRel.addAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme");
+        themeRel.addAttribute("Target", "theme/theme1.xml");
+
+        // 6. comments 关系（批注功能必需）
         Element commentsRel = relationships.addElement("Relationship");
         commentsRel.addAttribute("Id", "rComments");
         commentsRel.addAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments");
         commentsRel.addAttribute("Target", "comments.xml");
 
-        // 创建新的关系文件部分
-        PackagePart relsPart = opcPackage.createPart(relsPartName, "application/vnd.openxmlformats-package.relationships+xml");
+        // 【关键修复】检查Part是否已存在，避免重复创建
+        PackagePart relsPart;
+        try {
+            relsPart = opcPackage.getPart(relsPartName);
+            logger.debug("document.xml.rels已存在，将覆盖");
+        } catch (Exception e) {
+            relsPart = opcPackage.createPart(relsPartName, "application/vnd.openxmlformats-package.relationships+xml");
+            logger.debug("创建新的document.xml.rels Part");
+        }
 
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        XMLWriter writer = new XMLWriter(outputStream);
+        XMLWriter writer = new XMLWriter(outputStream, createOutputFormat());
         writer.write(relsDoc);
         writer.close();
 
@@ -1198,6 +1732,56 @@ public class WordXmlCommentProcessor {
             partStream.flush();
         }
 
-        logger.info("创建新的document.xml.rels文件，大小: {} 字节", outputStream.size());
+        logger.info("【维测】创建/更新document.xml.rels完成，包含{}个关系，大小: {} 字节", 
+                    relationships.elements().size(), outputStream.size());
+    }
+
+    /**
+     * 手动将 document.xml.rels 添加到 ZIP 文件中
+     */
+    private byte[] manuallyAddRelsToZip(byte[] originalZip, byte[] relsBytes) throws Exception {
+        logger.debug("开始手动修复 ZIP 文件：添加 document.xml.rels");
+        
+        try (java.util.zip.ZipInputStream zipIn = new java.util.zip.ZipInputStream(
+                new java.io.ByteArrayInputStream(originalZip));
+             java.io.ByteArrayOutputStream zipOut = new java.io.ByteArrayOutputStream();
+             java.util.zip.ZipOutputStream zipOutputStream = new java.util.zip.ZipOutputStream(zipOut)) {
+            
+            // 先检查是否已有 document.xml.rels
+            boolean needsAdd = true;
+            java.util.zip.ZipEntry entry;
+            while ((entry = zipIn.getNextEntry()) != null) {
+                if ("word/_rels/document.xml.rels".equals(entry.getName())) {
+                    logger.debug("ZIP 中已存在 document.xml.rels，跳过");
+                    needsAdd = false;
+                }
+                
+                // 复制其他所有条目
+                zipOutputStream.putNextEntry(new java.util.zip.ZipEntry(entry.getName()));
+                if (!entry.isDirectory()) {
+                    byte[] buffer = new byte[8192];
+                    int len;
+                    while ((len = zipIn.read(buffer)) > 0) {
+                        zipOutputStream.write(buffer, 0, len);
+                    }
+                }
+                zipOutputStream.closeEntry();
+            }
+            
+            // 如果需要，添加 document.xml.rels
+            if (needsAdd) {
+                logger.debug("添加 document.xml.rels 到 ZIP");
+                java.util.zip.ZipEntry relsEntry = new java.util.zip.ZipEntry("word/_rels/document.xml.rels");
+                zipOutputStream.putNextEntry(relsEntry);
+                zipOutputStream.write(relsBytes);
+                zipOutputStream.closeEntry();
+            }
+            
+            zipOutputStream.finish();
+            
+            logger.info("手动修复完成，ZIP 大小: {} 字节 -> {} 字节", 
+                       originalZip.length, zipOut.size());
+            return zipOut.toByteArray();
+        }
     }
 }

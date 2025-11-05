@@ -25,6 +25,7 @@
                 <button class="tab-btn" onclick="switchTab('chatgpt')">💬 ChatGPT集成</button>
                 <button class="tab-btn" onclick="switchTab('standards')">📋 审查标准</button>
                 <button class="tab-btn" onclick="switchTab('prompt')">🤖 智能审查</button>
+                <button class="tab-btn" onclick="switchTab('file-preview')">👁️ 文件预览</button>
             </div>
 
             <!-- 合同解析面板 -->
@@ -88,7 +89,7 @@
                     <strong>💡 工作原理：</strong> 系统先通过关键字/正则规则快速筛选"疑似问题"条款，然后为LLM生成结构化Prompt，只审查筛选后的内容。这样可以减少80%的LLM token消耗，加快审查速度。
                 </div>
 
-                <!-- 步骤1: 文件上传和合同类型选择 -->
+                <!-- 步骤1: 文件上传 -->
                 <div class="form-group">
                     <label class="file-upload-label">
                         <input type="file" id="rule-review-file" accept=".docx,.doc" onchange="handleRuleReviewFileSelect(this)">
@@ -97,49 +98,81 @@
                     </label>
                 </div>
 
-                <div class="form-group">
-                    <label for="rule-review-contract-type">合同类型:</label>
-                    <select id="rule-review-contract-type">
-                        <option value="通用合同">通用合同</option>
-                        <option value="采购">采购合同</option>
-                        <option value="外包">外包合同</option>
-                        <option value="NDA">保密协议(NDA)</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>审查立场: (选择您的身份，获得针对性的审查建议)</label>
-                    <div style="display: flex; gap: 15px; margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px; display: none;">
-                        <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                            <input type="radio" name="rule-review-stance" value="A" checked>
-                            <span><strong>甲方</strong> (获得甲方有利的建议)</span>
-                        </label>
-                        <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                            <input type="radio" name="rule-review-stance" value="B">
-                            <span><strong>乙方</strong> (获得乙方有利的建议)</span>
-                        </label>
-                    </div>
-                    <p style="font-size: 12px; color: #666; margin-top: 8px;">💡 提示：不同立场会返回针对性的审查建议。甲方更关注条款对自己的不利；乙方更关注如何保护自己的权益。</p>
+                <!-- 【新增】确认上传按钮 -->
+                <div style="display: flex; gap: 10px; margin-bottom: 20px;" id="confirm-upload-container">
+                    <button class="btn btn-primary" id="confirm-upload-btn" onclick="confirmRuleReviewFileUpload()" style="display: none;">
+                        <span class="btn-icon">✓</span> 确认上传
+                    </button>
+                    <button class="btn btn-ghost" id="change-file-btn" onclick="changeRuleReviewFile()" style="display: none;">
+                        <span class="btn-icon">↻</span> 更换文件
+                    </button>
                 </div>
 
-                <!-- 【新增】识别的合同方信息展示 -->
-                <div id="identified-parties-info" class="form-group" style="display: none; background: #e8f5e9; padding: 15px; border-radius: 4px; border-left: 4px solid #4CAF50;">
-                    <h4 style="margin: 0 0 10px 0; color: #2e7d32;">✓ 已识别合同方信息</h4>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div>
-                            <div style="font-weight: bold; color: #555; margin-bottom: 5px;">甲方:</div>
-                            <div id="identified-party-a" style="color: #2e7d32; font-size: 14px;">-</div>
-                        </div>
-                        <div>
-                            <div style="font-weight: bold; color: #555; margin-bottom: 5px;">乙方:</div>
-                            <div id="identified-party-b" style="color: #2e7d32; font-size: 14px;">-</div>
-                        </div>
+                <!-- 【新增】合同方信息识别展示（在确认后显示） -->
+                <div id="party-identification-section" style="display: none; margin-bottom: 20px; position: relative; z-index: 5;">
+                    <!-- 加载动画 -->
+                    <div id="party-identification-loading" class="loading" style="display: none; text-align: center; z-index: 15;">
+                        <div class="spinner"></div>
+                        <p>正在解析合同方信息...</p>
                     </div>
-                    <p style="font-size: 12px; color: #666; margin-top: 10px; margin-bottom: 0;">💡 提示：根据识别结果，建议您选择对应的立场以获得更准确的审查建议。</p>
+
+                    <!-- 已识别的合同方信息 -->
+                    <div id="identified-parties-info" class="form-group" style="display: none; background: #e8f5e9; padding: 15px; border-radius: 4px; border-left: 4px solid #4CAF50; z-index: 10;">
+                        <h4 style="margin: 0 0 10px 0; color: #2e7d32;">✓ 已识别合同方信息</h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                            <div>
+                                <div style="font-weight: bold; color: #555; margin-bottom: 5px;">甲方:</div>
+                                <div id="identified-party-a" style="color: #2e7d32; font-size: 14px; padding: 8px; background: white; border-radius: 3px; border-left: 3px solid #4CAF50;">-</div>
+                            </div>
+                            <div>
+                                <div style="font-weight: bold; color: #555; margin-bottom: 5px;">乙方:</div>
+                                <div id="identified-party-b" style="color: #2e7d32; font-size: 14px; padding: 8px; background: white; border-radius: 3px; border-left: 3px solid #4CAF50;">-</div>
+                            </div>
+                        </div>
+                        <p style="font-size: 12px; color: #666; margin: 0;">💡 请选择您的身份并选择审查方式继续</p>
+                    </div>
                 </div>
 
-                <button class="btn btn-primary btn-large" onclick="startRuleReview()">
-                    <span class="btn-icon">🔍</span> 开始规则审查
-                </button>
+                <!-- 步骤2: 合同类型和审查立场选择（在确认后显示） -->
+                <div id="review-options-section" style="display: none; position: relative; z-index: 20; margin-top: 20px; padding: 20px; background: #f5f5f5; border-radius: 4px;">
+                    <div class="form-group">
+                        <label for="rule-review-contract-type">合同类型:</label>
+                        <select id="rule-review-contract-type">
+                            <option value="通用合同">通用合同</option>
+                            <option value="采购">采购合同</option>
+                            <option value="外包">外包合同</option>
+                            <option value="NDA">保密协议(NDA)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>审查立场: (选择您的身份，获得针对性的审查建议)</label>
+                        <div style="display: flex; gap: 15px; margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px;">
+                            <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="rule-review-stance" value="A方" checked>
+                                <span><strong>甲方</strong> (获得甲方有利的建议)</span>
+                            </label>
+                            <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="rule-review-stance" value="B方">
+                                <span><strong>乙方</strong> (获得乙方有利的建议)</span>
+                            </label>
+                        </div>
+                        <p style="font-size: 12px; color: #666; margin-top: 8px;">💡 提示：不同立场会返回针对性的审查建议。甲方更关注条款对自己的不利；乙方更关注如何保护自己的权益。</p>
+                    </div>
+
+                    <!-- 步骤3: 选择审查方式 -->
+                    <div class="form-group">
+                        <label>选择审查方式:</label>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <button class="btn btn-primary btn-large" onclick="proceedWithRuleReview()">
+                                <span class="btn-icon">🔍</span> 开始规则审查
+                            </button>
+                            <button class="btn btn-success btn-large" onclick="proceedWithOneClickReview()" title="一键完成合同解析、审查和批注，直接生成带批注的文档">
+                                <span class="btn-icon">🚀</span> 开始一键审查
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- 加载动画 -->
                 <div id="rule-review-loading" class="loading" style="display: none;">
@@ -694,6 +727,55 @@
                     <p>正在生成审查Prompt...</p>
                 </div>
             </div>
+
+            <!-- 文件预览面板 -->
+            <div id="file-preview-panel" class="panel">
+                <div class="panel-header">
+                    <h2>👁️ 文件预览</h2>
+                    <p>预览MinIO云桶中的文档文件，支持多种格式</p>
+                </div>
+
+                <div class="preview-container">
+                    <!-- 文件列表区域 -->
+                    <div class="file-list-section">
+                        <div class="section-header">
+                            <h3>📁 文件列表</h3>
+                            <div class="section-actions">
+                                <button class="btn btn-secondary" onclick="fileManager.refresh()">
+                                    <span>🔄</span> 刷新列表
+                                </button>
+                            </div>
+                        </div>
+                        <div id="file-list-container" class="file-list-container">
+                            <div class="loading-state">
+                                <div class="loading-spinner"></div>
+                                <div class="loading-text">正在加载文件列表...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 预览区域 -->
+                    <div id="preview-panel" class="preview-section" style="display: none;">
+                        <div id="preview-header" class="preview-header">
+                            <div class="preview-title">
+                                <span class="preview-icon">📄</span>
+                                <span class="preview-name">选择文件进行预览</span>
+                            </div>
+                            <div class="preview-actions">
+                                <button class="btn-close" onclick="fileManager.closePreview()">
+                                    <span>✕</span> 关闭
+                                </button>
+                            </div>
+                        </div>
+                        <div id="onlyoffice-container" class="onlyoffice-container">
+                            <div class="preview-placeholder">
+                                <div class="placeholder-icon">👁️</div>
+                                <div class="placeholder-text">点击文件列表中的"预览"按钮开始预览</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
 
         <!-- 底部信息 -->
@@ -735,5 +817,21 @@
     <script src="/js/main.js"></script>
     <script src="/js/qwen-review.js"></script>
     <script src="/js/party-extraction.js"></script>
+    <script src="/js/file-manager.js"></script>
+    <script src="/js/onlyoffice-previewer.js"></script>
+    
+    <!-- OnlyOffice Document Server API (动态加载) -->
+    <!-- <script src="http://localhost:8082/web-apps/apps/api/documents/api.js"></script> -->
+    
+    <script>
+        // 页面加载完成后初始化文件管理器
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化文件管理器
+            fileManager.init();
+            
+            // 初始化OnlyOffice预览器
+            onlyOfficePreviewer.init();
+        });
+    </script>
 </body>
 </html>

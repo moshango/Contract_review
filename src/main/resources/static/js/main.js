@@ -1028,6 +1028,13 @@ async function importChatGPTResult() {
         formData.append('file', chatgptFile);
         console.warn('⚠️ parseResultId不存在，将使用原始文件进行批注（可能定位不精确）');
     }
+    if (ruleReviewFile) {
+        formData.append('file', ruleReviewFile);
+        console.log('✓ 已添加文件到FormData作为备选方案:', ruleReviewFile.name);
+    } else {
+        console.warn('⚠️ ruleReviewFile 不存在，将无法提供文件备选方案');
+    }
+
     formData.append('chatgptResponse', chatgptResponse);
 
     try {
@@ -1155,7 +1162,60 @@ function handleRuleReviewFileSelect(input) {
         const fileNameSpan = document.getElementById('rule-review-file-name');
         fileNameSpan.textContent = file.name;
         fileNameSpan.classList.add('selected');
+
+        // 【关键修复】显示确认上传和更换文件按钮
+        document.getElementById('confirm-upload-btn').style.display = 'inline-block';
+        document.getElementById('change-file-btn').style.display = 'inline-block';
+
+        // 隐藏之前的结果
+        document.getElementById('party-identification-section').style.display = 'none';
+        document.getElementById('review-options-section').style.display = 'none';
+        document.getElementById('rule-review-result').style.display = 'none';
+
+        console.log('✅ 文件已选择: ' + file.name + ', 确认按钮已显示');
     }
+}
+
+/**
+ * 【新增】确认上传文件并识别合同方
+ */
+function confirmRuleReviewFileUpload() {
+    if (!ruleReviewFile) {
+        showToast('请先选择合同文件', 'error');
+        return;
+    }
+
+    console.log('📋 用户确认上传文件:', ruleReviewFile.name);
+    console.log('📋 开始识别合同方...');
+
+    // 隐藏按钮
+    document.getElementById('confirm-upload-btn').style.display = 'none';
+    document.getElementById('change-file-btn').style.display = 'none';
+
+    // 调用提取合同方的函数
+    extractRuleReviewParties();
+}
+
+/**
+ * 【新增】更换文件
+ */
+function changeRuleReviewFile() {
+    // 清空文件
+    ruleReviewFile = null;
+    document.getElementById('rule-review-file').value = '';
+    document.getElementById('rule-review-file-name').textContent = '支持 .docx 和 .doc 格式';
+    document.getElementById('rule-review-file-name').classList.remove('selected');
+
+    // 隐藏按钮
+    document.getElementById('confirm-upload-btn').style.display = 'none';
+    document.getElementById('change-file-btn').style.display = 'none';
+
+    // 隐藏结果
+    document.getElementById('party-identification-section').style.display = 'none';
+    document.getElementById('review-options-section').style.display = 'none';
+    document.getElementById('rule-review-result').style.display = 'none';
+
+    showToast('✓ 已清空文件，可重新选择', 'info');
 }
 
 // 启动规则审查
@@ -1305,8 +1365,17 @@ async function importRuleReviewResult() {
     document.getElementById('rule-review-import-loading').style.display = 'block';
     document.getElementById('rule-review-import-result').style.display = 'none';
 
-    // 【关键修复】构建 FormData - 无需传输文件，使用 parseResultId 获取缓存的带锚点文档
+    // 【关键修复】构建 FormData - 总是传递文件作为备选方案
+    // 即使有 parseResultId，也要提供文件以确保在缓存失效时有备选文档
+    // 这样与一键审查流程和ChatGPT导入流程保持一致
     const formData = new FormData();
+    if (ruleReviewFile) {
+        formData.append('file', ruleReviewFile);
+        console.log('✓ 已添加文件到FormData作为备选方案:', ruleReviewFile.name);
+    } else {
+        console.warn('⚠️ ruleReviewFile 不存在，将无法提供文件备选方案');
+    }
+
     formData.append('chatgptResponse', chatgptResponse);
 
     try {

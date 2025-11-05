@@ -104,7 +104,9 @@ public class ApiReviewController {
             // 【新增】保存到缓存并生成 parseResultId
             String parseResultId = null;
             if (anchoredDocumentBytes != null && anchoredDocumentBytes.length > 0) {
-                parseResultId = parseResultCache.store(parseResult, anchoredDocumentBytes, filename);
+                String cacheFilename = parseResultWithDoc.getDocumentFilename() != null ?
+                        parseResultWithDoc.getDocumentFilename() : filename;
+                parseResultId = parseResultCache.store(parseResult, anchoredDocumentBytes, cacheFilename);
                 logger.info("✓ 带锚点文档已保存到缓存，parseResultId: {}", parseResultId);
             }
 

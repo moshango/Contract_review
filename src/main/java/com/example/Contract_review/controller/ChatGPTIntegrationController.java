@@ -72,18 +72,23 @@ public class ChatGPTIntegrationController {
             ContractParseService.ParseResultWithDocument resultWithDoc = null;
             ParseResult parseResult;
             byte[] documentWithAnchorsBytes = null;
+            String anchoredDocumentFilename = null;
 
-            if (file.getOriginalFilename() != null &&
-                file.getOriginalFilename().toLowerCase().endsWith(".docx")) {
-                // DOCX 文件：可以获取带锚点的文档
+            String originalFilename = file.getOriginalFilename();
+            boolean supportsAnchoredDocument = originalFilename != null &&
+                    (originalFilename.toLowerCase().endsWith(".docx") || originalFilename.toLowerCase().endsWith(".doc"));
+
+            if (supportsAnchoredDocument) {
                 resultWithDoc = contractParseService.parseContractWithDocument(file, anchors);
                 parseResult = resultWithDoc.getParseResult();
                 documentWithAnchorsBytes = resultWithDoc.getDocumentBytes();
-                logger.info("已生成带锚点的 DOCX 文档: size={} 字节",
-                    documentWithAnchorsBytes != null ? documentWithAnchorsBytes.length : 0);
+                anchoredDocumentFilename = resultWithDoc.getDocumentFilename();
+                logger.info("已生成带锚点文档: filename={}, size={} 字节", anchoredDocumentFilename,
+                        documentWithAnchorsBytes != null ? documentWithAnchorsBytes.length : 0);
             } else {
-                // DOC 文件或其他格式：使用原有方法
+                // 其他格式退化为原有解析方法
                 parseResult = contractParseService.parseContract(file, anchors);
+                logger.warn("⚠️ 文件格式不支持生成带锚点文档，将仅返回解析结果: filename={}", originalFilename);
             }
 
             // 生成ChatGPT提示
@@ -100,6 +105,17 @@ public class ChatGPTIntegrationController {
             result.put("instructions", responseJson.get("instructions"));
             result.put("parseResult", parseResult); // 保存解析结果供后续使用
 
+            if (parseResult.getMeta() != null) {
+                Object convertedFlag = parseResult.getMeta().get("convertedFromDoc");
+                if (convertedFlag != null) {
+                    result.put("convertedFromDoc", convertedFlag);
+                }
+                Object generatedDocx = parseResult.getMeta().get("generatedDocxFilename");
+                if (generatedDocx != null) {
+                    result.put("generatedDocxFilename", generatedDocx);
+                }
+            }
+
             // 【关键修复】返回带锚点的文档（Base64 编码）
             if (documentWithAnchorsBytes != null && documentWithAnchorsBytes.length > 0) {
                 String documentBase64 = java.util.Base64.getEncoder().encodeToString(documentWithAnchorsBytes);
@@ -108,11 +124,15 @@ public class ChatGPTIntegrationController {
                     "本文档包含生成的锚点书签，用于精确批注定位。在步骤2中使用此文档以获得最佳效果。");
                 result.put("getDocumentUrl",
                     "提示：也可以调用 POST /chatgpt/get-document-with-anchors 直接下载带锚点的文档");
+                if (anchoredDocumentFilename != null) {
+                    result.put("documentWithAnchorsFilename", anchoredDocumentFilename);
+                }
 
                 // 【完整修复】将 Parse 结果存储到缓存，并返回 parseResultId
                 // 这样 /import-result-xml 端点可以通过 parseResultId 获取相同的文档
+                String cacheFilename = anchoredDocumentFilename != null ? anchoredDocumentFilename : file.getOriginalFilename();
                 String parseResultId = parseResultCache.store(
-                    parseResult, documentWithAnchorsBytes, file.getOriginalFilename());
+                    parseResult, documentWithAnchorsBytes, cacheFilename);
 
                 result.put("parseResultId", parseResultId);
                 result.put("parseResultIdUsage",
@@ -389,9 +409,10 @@ public class ChatGPTIntegrationController {
             logger.info("获取带锚点的文档: filename={}", file.getOriginalFilename());
 
             String filename = file.getOriginalFilename();
-            if (filename == null || !filename.toLowerCase().endsWith(".docx")) {
+            if (filename == null || (!filename.toLowerCase().endsWith(".docx") &&
+                                      !filename.toLowerCase().endsWith(".doc"))) {
                 return ResponseEntity.badRequest()
-                    .body("错误：仅支持 .docx 格式文件");
+                    .body("错误：仅支持 .docx 或 .doc 格式文件");
             }
 
             // 【关键】解析并生成带锚点的文档
@@ -405,9 +426,7 @@ public class ChatGPTIntegrationController {
                     .body("错误：无法生成带锚点的文档");
             }
 
-            // 生成文件名（带时间戳以避免冲突）
-            String outputFilename = filename.replace(".docx", "_with_anchors.docx");
-
+            String outputFilename = resultWithDoc.getDocumentFilename();
             logger.info("已生成带锚点的文档: filename={}, size={} 字节",
                 outputFilename, documentBytes.length);
 

@@ -93,8 +93,12 @@ public class ContractController {
                             .body(errorResponse("returnMode=file 需要 anchors=generate 或 regenerate"));
                 }
 
+                String downloadName = resultWithDoc.getDocumentFilename() != null ?
+                        resultWithDoc.getDocumentFilename() :
+                        (filename != null ? filename.replaceAll("\\.(?i)(docx|doc)$", "") + "_with_anchors.docx" : "parsed-with-anchors.docx");
+
                 return buildFileResponse(resultWithDoc.getDocumentBytes(),
-                                        "parsed-with-anchors.docx");
+                                        downloadName);
 
             } else if ("both".equalsIgnoreCase(returnMode)) {
                 // 返回JSON和文档文件
@@ -106,10 +110,14 @@ public class ContractController {
                             .body(errorResponse("returnMode=both 需要 anchors=generate 或 regenerate"));
                 }
 
+                String downloadName = resultWithDoc.getDocumentFilename() != null ?
+                        resultWithDoc.getDocumentFilename() :
+                        (filename != null ? filename.replaceAll("\\.(?i)(docx|doc)$", "") + "_with_anchors.docx" : "parsed-with-anchors.docx");
+
                 // TODO: 实现同时返回JSON和文件的方式
                 // 目前优先返回文件,JSON可通过响应头传递或使用multipart
                 return buildFileResponse(resultWithDoc.getDocumentBytes(),
-                                        "parsed-with-anchors.docx");
+                                        downloadName);
 
             } else {
                 return ResponseEntity.badRequest()

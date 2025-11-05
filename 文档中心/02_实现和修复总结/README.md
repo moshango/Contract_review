@@ -2,11 +2,11 @@
 
 ## 🔧 功能实现和 Bug 修复记录
 
-本目录包含所有重要功能的实现总结和已修复 Bug 的详细报告。共 **24 份文档**。
+本目录包含所有重要功能的实现总结和已修复 Bug 的详细报告。共 **25 份文档**。
 
 ### 📄 文档分类
 
-#### 核心修复文档（8份）
+#### 核心实现和修复文档（9份）
 1. **01_ParseResultId修复完整总结.md** - ParseResultId 问题的完整分析和修复方案
 2. **02_工作流修复完整总结.md** - 工作流设计问题的修复和优化方案
 3. **03_关键双变量错误修复.md** - 关键的双变量错误问题的根本原因和解决方案
@@ -15,34 +15,39 @@
 6. **06_最终问题解决报告.md** - 最终的问题解决总结和验证结果
 7. **07_项目完成报告.md** - 项目的完成状态和交付清单
 8. **08_项目总结.md** - 项目的总体总结和经验教训
+9. **09_一键式审查功能实现.md** - ⭐ 新增：一键式审查功能的完整实现说明
 
 #### 当事人提取相关（3份）
-9. **BUG_FIX_PARTY_EXTRACTION.md** - 当事人提取问题诊断
-10. **PARTY_EXTRACTION_OPTIMIZATION.md** - 当事人提取优化方案
-11. **PARTY_INFO_EXTRACTION_SOLUTION.md** - 当事人信息提取解决方案
+10. **BUG_FIX_PARTY_EXTRACTION.md** - 当事人提取问题诊断
+11. **PARTY_EXTRACTION_OPTIMIZATION.md** - 当事人提取优化方案
+12. **PARTY_INFO_EXTRACTION_SOLUTION.md** - 当事人信息提取解决方案
 
 #### ParseResultId 相关（4份）
-12. **PARSERESULTID_FIX.md** - ParseResultId 修复（第一版）
-13. **PARSERESULTID_FLOW_FIX.md** - 工作流中 ParseResultId 修复
-14. **COMPLETE_PARSERESULTID_FIX.md** - ParseResultId 完整修复
-15. **PARSERESULTID_EXTRACTION_FIX.md** - ParseResultId 提取修复
+13. **PARSERESULTID_FIX.md** - ParseResultId 修复（第一版）
+14. **PARSERESULTID_FLOW_FIX.md** - 工作流中 ParseResultId 修复
+15. **COMPLETE_PARSERESULTID_FIX.md** - ParseResultId 完整修复
+16. **PARSERESULTID_EXTRACTION_FIX.md** - ParseResultId 提取修复
 
 #### 实现总结类（5份）
-16. **IMPLEMENTATION_COMPLETE.md** - 实现完成报告
-17. **IMPLEMENTATION_SUMMARY.md** - 实现总结
-18. **PLAN_A_IMPLEMENTATION_SUMMARY.md** - 实现方案总结
-19. **QUICK_FIX_SUMMARY.md** - 快速修复总结
-20. **FIX_COMPLETION_SUMMARY.md** - 修复完成总结
+17. **IMPLEMENTATION_COMPLETE.md** - 实现完成报告
+18. **IMPLEMENTATION_SUMMARY.md** - 实现总结
+19. **PLAN_A_IMPLEMENTATION_SUMMARY.md** - 实现方案总结
+20. **QUICK_FIX_SUMMARY.md** - 快速修复总结
+21. **FIX_COMPLETION_SUMMARY.md** - 修复完成总结
 
 #### 其他文档（4份）
-21. **BUG_FIX_ANNOTATION_ISSUE.md** - 批注问题修复
-22. **FILESTREAM_BUG_FIX.md** - 文件流 Bug 修复
-23. **FINAL_PARTY_EXTRACTION_SOLUTION.md** - 当事人提取最终方案
-24. **docs/修复总结/ 目录下的其他文件** - 包含各种修复总结
+22. **BUG_FIX_ANNOTATION_ISSUE.md** - 批注问题修复
+23. **FILESTREAM_BUG_FIX.md** - 文件流 Bug 修复
+24. **FINAL_PARTY_EXTRACTION_SOLUTION.md** - 当事人提取最终方案
+25. **docs/修复总结/ 目录下的其他文件** - 包含各种修复总结
 
 ---
 
 ## 🎯 按修复主题快速查找
+
+### 一键式审查功能
+- **功能描述**：完整的合同审查工作流一步到位
+- **查看文档**：[`09_一键式审查功能实现.md`](09_一键式审查功能实现.md)
 
 ### ParseResultId 相关
 - **问题描述**：ParseResultId 在某些工作流中丢失或获取不到
@@ -68,6 +73,7 @@
 
 | 修复项 | 优先级 | 状态 | 修复时间 |
 |------|------|------|--------|
+| 一键式审查功能 | 🟢 新功能 | ✅ 已实现 | 2025-10-27 |
 | ParseResultId 丢失 | 🔴 高 | ✅ 已修复 | 2024-10-24 |
 | 工作流设计缺陷 | 🔴 高 | ✅ 已修复 | 2024-10-24 |
 | 双变量错误 | 🔴 高 | ✅ 已修复 | 2024-10-24 |

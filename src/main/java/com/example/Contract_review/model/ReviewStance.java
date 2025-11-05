@@ -135,11 +135,25 @@ public class ReviewStance {
      * @return ReviewStance 对象
      */
     public static ReviewStance fromPartyId(String partyId) {
-        if ("A".equalsIgnoreCase(partyId)) {
+        if (partyId == null || partyId.trim().isEmpty()) {
+            return neutral();
+        }
+
+        String normalized = partyId.trim().toUpperCase();
+
+        // 支持多种格式识别党派 ID
+        // "A" / "A方" / "甲方" / "甲" → 甲方
+        if (normalized.equals("A") || normalized.equals("A方") ||
+            normalized.equals("甲方") || normalized.equals("甲")) {
             return partyA();
-        } else if ("B".equalsIgnoreCase(partyId)) {
+        }
+        // "B" / "B方" / "乙方" / "乙" → 乙方
+        else if (normalized.equals("B") || normalized.equals("B方") ||
+                 normalized.equals("乙方") || normalized.equals("乙")) {
             return partyB();
-        } else {
+        }
+        // 无法识别的格式 → 中立
+        else {
             return neutral();
         }
     }

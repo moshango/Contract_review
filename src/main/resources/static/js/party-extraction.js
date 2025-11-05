@@ -140,59 +140,92 @@ async function extractRuleReviewParties() {
 
 /**
  * 显示识别的合同方信息，让用户选择立场
+ *
+ * 顺序显示流程：
+ * 1. 首先隐藏所有加载动画
+ * 2. 显示甲乙方信息区域 (identified-parties-info)
+ * 3. 显示立场选择和审查方式区域 (review-options-section)
+ *
+ * 确保两个关键元素都正确显示：
+ * - identified-parties-info：显示甲乙方信息
+ * - review-options-section：显示立场选择和审查方式
  */
 function displayPartyExtractionResult(extractionResult, contractType) {
-    // 隐藏原来的立场选择
-    const stanceRadioGroup = document.querySelector('[name="rule-review-stance"]').parentElement.parentElement;
-    stanceRadioGroup.style.display = 'none';
+    logger.log('【关键】displayPartyExtractionResult 被调用，开始顺序显示流程');
 
-    // 显示识别的合同方信息
+    // 步骤1：隐藏所有可能的加载动画元素
+    const partyIdentificationLoading = document.getElementById('party-identification-loading');
+    if (partyIdentificationLoading) {
+        partyIdentificationLoading.style.display = 'none';
+        logger.log('✅ 步骤1a: 已隐藏 party-identification-loading 加载动画');
+    }
+
+    const ruleReviewLoading = document.getElementById('rule-review-loading');
+    if (ruleReviewLoading) {
+        ruleReviewLoading.style.display = 'none';
+        logger.log('✅ 步骤1b: 已隐藏 rule-review-loading 加载动画');
+    }
+
+    // 【关键修复】步骤1c：显示父容器 party-identification-section
+    const parentSection = document.getElementById('party-identification-section');
+    if (parentSection) {
+        parentSection.style.display = 'block';
+        logger.log('✅ 步骤1c: 【关键修复】已显示父容器 party-identification-section');
+    }
+
+    // 步骤2：显示甲乙方信息区域 (identified-parties-info)
     const partiesInfoDiv = document.getElementById('identified-parties-info');
-    partiesInfoDiv.style.display = 'block';
+    if (partiesInfoDiv) {
+        partiesInfoDiv.style.display = 'block';
+        partiesInfoDiv.style.visibility = 'visible';
+        partiesInfoDiv.style.opacity = '1';
+        partiesInfoDiv.style.zIndex = '100';
+        logger.log('✅ 步骤2: 已显示甲乙方信息区域 (identified-parties-info)');
 
-    // 更新显示的内容
-    document.getElementById('identified-party-a').innerHTML =
-        `<strong>${extractionResult.partyA}</strong><br/><span style="font-size: 12px; color: #666;">(${extractionResult.partyARoleName})</span>`;
+        // 【调试】检查元素状态
+        logger.log('🔍 调试: identified-parties-info 元素状态:', {
+            display: partiesInfoDiv.style.display,
+            visibility: partiesInfoDiv.style.visibility,
+            offsetHeight: partiesInfoDiv.offsetHeight,
+            offsetWidth: partiesInfoDiv.offsetWidth,
+            isVisible: partiesInfoDiv.offsetHeight > 0
+        });
+    }
 
-    document.getElementById('identified-party-b').innerHTML =
-        `<strong>${extractionResult.partyB}</strong><br/><span style="font-size: 12px; color: #666;">(${extractionResult.partyBRoleName})</span>`;
+    // 步骤2：更新甲乙方显示内容
+    document.getElementById('identified-party-a').textContent = extractionResult.partyA || '(未识别)';
+    document.getElementById('identified-party-b').textContent = extractionResult.partyB || '(未识别)';
+    logger.log('✅ 步骤2: 已更新甲乙方显示内容: ' + extractionResult.partyA + ' / ' + extractionResult.partyB);
 
-    // 添加立场选择按钮
-    let stanceButtonsHTML = `
-        <div style="margin-top: 15px; padding: 15px; background: #f5f5f5; border-radius: 4px;">
-            <p style="margin: 0 0 10px 0; font-weight: bold; color: #333;">请选择您的立场：</p>
-            <div style="display: flex; gap: 15px;">
-                <button class="btn btn-primary" onclick="selectRuleReviewStance('A')"
-                        style="flex: 1; background: #E3F2FD; color: #1976D2; border: 2px solid #1976D2;">
-                    <span>选择甲方立场</span><br/>
-                    <span style="font-size: 12px;">${extractionResult.partyA}</span>
-                </button>
-                <button class="btn btn-primary" onclick="selectRuleReviewStance('B')"
-                        style="flex: 1; background: #F3E5F5; color: #7B1FA2; border: 2px solid #7B1FA2;">
-                    <span>选择乙方立场</span><br/>
-                    <span style="font-size: 12px;">${extractionResult.partyB}</span>
-                </button>
-            </div>
-            <p style="font-size: 12px; color: #666; margin: 10px 0 0 0; font-style: italic;">
-                💡 提示：${extractionResult.stanceReason || '根据您的身份选择对应的立场获得更准确的审查建议'}
-            </p>
-        </div>
-    `;
+    // 【调试】验证内容是否正确设置
+    const partyAElement = document.getElementById('identified-party-a');
+    const partyBElement = document.getElementById('identified-party-b');
+    logger.log('🔍 调试: 甲乙方元素内容验证:', {
+        partyA: partyAElement ? partyAElement.textContent : 'NOT_FOUND',
+        partyB: partyBElement ? partyBElement.textContent : 'NOT_FOUND'
+    });
 
-    // 在识别信息后插入立场选择按钮
-    const insertionPoint = partiesInfoDiv.nextElementSibling;
-    if (insertionPoint && insertionPoint.id === 'party-stance-buttons') {
-        insertionPoint.innerHTML = stanceButtonsHTML;
+    // 步骤3：显示立场选择和审查方式区域 (review-options-section)
+    const reviewOptionsSection = document.getElementById('review-options-section');
+    if (reviewOptionsSection) {
+        reviewOptionsSection.style.display = 'block';
+        reviewOptionsSection.style.zIndex = '20';
+        logger.log('✅ 步骤3: 已显示立场选择和审查方式区域 (review-options-section)');
     } else {
-        const stanceButtonDiv = document.createElement('div');
-        stanceButtonDiv.id = 'party-stance-buttons';
-        stanceButtonDiv.innerHTML = stanceButtonsHTML;
-        partiesInfoDiv.parentNode.insertBefore(stanceButtonDiv, insertionPoint);
+        logger.error('❌ 步骤3: 找不到 review-options-section 元素！');
+    }
+
+    // 验证原生立场选择UI是否可用
+    const stanceRadioGroup = document.querySelector('[name="rule-review-stance"]');
+    if (stanceRadioGroup) {
+        logger.log('✅ 验证: 原生立场选择UI 可用');
     }
 
     // 保存提取结果供后续使用
     window.currentPartyExtractionResult = extractionResult;
     window.currentRuleReviewContractType = contractType;
+
+    logger.log('✅ 【完成】顺序显示流程完成：甲乙方信息 → 立场选择和审查方式');
 }
 
 /**
@@ -301,36 +334,76 @@ function displayRuleReviewClauses(clauses) {
     const clausesDiv = document.getElementById('rule-review-clauses');
     let html = '';
 
+    // 确保 clauses 是有效的数组
+    if (!clauses || !Array.isArray(clauses) || clauses.length === 0) {
+        clausesDiv.innerHTML = '<p style="padding: 15px; color: #999;">未检出匹配的条款</p>';
+        return;
+    }
+
     clauses.forEach((clause, index) => {
+        // 防御性编程：检查clause是否为空
+        if (!clause) {
+            return;
+        }
+
         const riskColorMap = {
             'high': '#F44336',
             'medium': '#FF9800',
             'low': '#FFC107'
         };
-        const riskColor = riskColorMap[clause.riskLevel] || '#999';
+
+        // 修复：安全地获取风险等级，支持多种字段名
+        let riskLevel = 'low';
+        if (clause.riskLevel) {
+            riskLevel = String(clause.riskLevel).toLowerCase();
+        } else if (clause.highestRisk) {
+            riskLevel = String(clause.highestRisk).toLowerCase();
+        }
+
+        const riskColor = riskColorMap[riskLevel] || '#999';
+        const matchedRuleCount = clause.matchedRuleCount || 0;
+        const matchedRules = clause.matchedRules || [];
 
         html += `
             <div style="border-bottom: 1px solid #eee; padding: 15px; margin-bottom: 10px;">
                 <div style="display: flex; align-items: center; margin-bottom: 10px;">
                     <span style="display: inline-block; width: 8px; height: 8px; background: ${riskColor}; border-radius: 50%; margin-right: 10px;"></span>
-                    <strong style="font-size: 16px;">${clause.clauseId} - ${clause.heading}</strong>
-                    <span style="margin-left: 10px; padding: 3px 8px; background: ${riskColor}; color: white; border-radius: 3px; font-size: 12px;">${clause.riskLevel.toUpperCase()}</span>
-                    <span style="margin-left: auto; color: #666; font-size: 12px;">${clause.matchedRuleCount} 条规则匹配</span>
+                    <strong style="font-size: 16px;">${clause.clauseId || '未知'} - ${clause.heading || '未知'}</strong>
+                    <span style="margin-left: 10px; padding: 3px 8px; background: ${riskColor}; color: white; border-radius: 3px; font-size: 12px;">${riskLevel.toUpperCase()}</span>
+                    <span style="margin-left: auto; color: #666; font-size: 12px;">${matchedRuleCount} 条规则匹配</span>
                 </div>
 
                 <div style="background: #f9f9f9; padding: 10px; border-left: 3px solid ${riskColor}; margin-bottom: 10px; border-radius: 2px;">
                     <div style="font-size: 13px; line-height: 1.6; color: #333;">
-                        ${clause.matchedRules.map(rule => `
+                        ${matchedRules.map(rule => {
+                            if (!rule) return '';
+
+                            let ruleRiskLevel = 'low';
+                            if (rule.risk) {
+                                ruleRiskLevel = String(rule.risk).toLowerCase();
+                            } else if (rule.riskLevel) {
+                                ruleRiskLevel = String(rule.riskLevel).toLowerCase();
+                            }
+
+                            const ruleRiskColor = riskColorMap[ruleRiskLevel] || '#999';
+                            let keywords = [];
+                            if (rule.matchedKeywords) {
+                                keywords = Array.isArray(rule.matchedKeywords) ? rule.matchedKeywords : [String(rule.matchedKeywords)];
+                            } else if (rule.keywords) {
+                                keywords = Array.isArray(rule.keywords) ? rule.keywords : [String(rule.keywords)];
+                            }
+
+                            return `
                             <div style="margin-bottom: 12px;">
-                                <strong style="color: ${riskColor};">【${rule.risk.toUpperCase()}】 ${rule.id || '规则'}</strong>
-                                ${rule.matchedKeywords ? `
+                                <strong style="color: ${ruleRiskColor};">【${ruleRiskLevel.toUpperCase()}】 ${rule.id || '规则'}</strong>
+                                ${keywords.length > 0 ? `
                                     <div style="margin: 5px 0; font-size: 11px; color: #999;">
-                                        🔍 匹配关键词: <span style="background: #ffffcc; padding: 2px 4px; border-radius: 2px;">${rule.matchedKeywords.join(', ')}</span>
+                                        🔍 匹配关键词: <span style="background: #ffffcc; padding: 2px 4px; border-radius: 2px;">${keywords.join(', ')}</span>
                                     </div>
                                 ` : ''}
-                                <p style="margin: 5px 0; font-size: 12px; color: #666;">${rule.checklist.split('\n').join('<br>')}</p>
+                                <p style="margin: 5px 0; font-size: 12px; color: #666;">${(rule.checklist || '').split('\n').join('<br>')}</p>
                             </div>
-                        `).join('')}
+                        `}).join('')}
                     </div>
                 </div>
             </div>
@@ -354,3 +427,201 @@ const logger = {
         console.error('[RuleReview]', message, error || '');
     }
 };
+
+/**
+ * 继续规则审查（用户选择立场后）
+ */
+async function proceedWithRuleReview() {
+    if (!ruleReviewFile) {
+        showToast('请先选择合同文件', 'error');
+        return;
+    }
+
+    const stance = document.querySelector('input[name="rule-review-stance"]:checked').value;
+    if (!stance) {
+        showToast('请选择审查立场', 'error');
+        return;
+    }
+
+    logger.log('✓ 用户选择规则审查立场:', stance);
+
+    // 隐藏审查选项，显示加载
+    document.getElementById('review-options-section').style.display = 'none';
+    const loadingDiv = document.getElementById('rule-review-loading');
+    loadingDiv.style.display = 'flex';
+    loadingDiv.innerHTML = '<div class="spinner"></div><p>正在进行规则审查，请稍候...</p>';
+
+    try {
+        const contractType = document.getElementById('rule-review-contract-type').value;
+        const formData = new FormData();
+        formData.append('file', ruleReviewFile);
+        formData.append('contractType', contractType);
+        formData.append('party', stance);
+        formData.append('reviewMode', 'rules');
+
+        logger.log('调用规则审查接口', {file: ruleReviewFile.name, contractType, party: stance});
+
+        // 【关键修复】保存立场到全局变量
+        window.ruleReviewStance = stance;
+        logger.log('✅ 【关键】proceedWithRuleReview 已保存审查立场:', window.ruleReviewStance);
+
+        const response = await fetch('/api/unified/review', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '规则审查失败');
+        }
+
+        const data = await response.json();
+        logger.log('✓ 规则审查完成', data);
+
+        // 隐藏加载动画
+        loadingDiv.style.display = 'none';
+
+        if (data.success) {
+            // 保存结果和parseResultId
+            window.ruleReviewResult = data;
+            window.ruleReviewParseResultId = data.parseResultId;
+            logger.log('✅ 【关键】proceedWithRuleReview 已设置 parseResultId:', window.ruleReviewParseResultId);
+
+            // 显示统计信息
+            const stats = data.statistics || {};
+            document.getElementById('stat-total-clauses').textContent = stats.totalClauses || 0;
+            document.getElementById('stat-matched-clauses').textContent = stats.matchedClauses || 0;
+            document.getElementById('stat-high-risk').textContent = stats.highRiskClauses || 0;
+            document.getElementById('stat-total-rules').textContent = stats.totalRules || 0;
+
+            // 显示风险分布
+            const matchResults = data.matchResults || [];
+            let riskCount = { high: 0, medium: 0, low: 0 };
+            matchResults.forEach(result => {
+                const riskLevel = result.riskLevel?.toLowerCase() || 'low';
+                if (riskLevel in riskCount) {
+                    riskCount[riskLevel]++;
+                }
+            });
+            document.getElementById('risk-high').textContent = riskCount.high || 0;
+            document.getElementById('risk-medium').textContent = riskCount.medium || 0;
+            document.getElementById('risk-low').textContent = riskCount.low || 0;
+
+            // 显示匹配的条款
+            displayRuleReviewClauses(matchResults);
+
+            // 显示Prompt
+            const promptElement = document.getElementById('rule-review-prompt');
+            if (promptElement) {
+                promptElement.textContent = data.prompt || '';
+            }
+
+            // 显示结果
+            document.getElementById('rule-review-result').style.display = 'block';
+
+            showToast('✅ 规则审查完成！', 'success');
+        } else {
+            showToast('❌ 规则审查失败：' + (data.error || '未知错误'), 'error');
+        }
+    } catch (error) {
+        logger.error('规则审查失败', error);
+        loadingDiv.style.display = 'none';
+        showToast('❌ 规则审查失败：' + error.message, 'error');
+    }
+}
+
+/**
+ * 继续一键审查（用户选择立场后）
+ */
+async function proceedWithOneClickReview() {
+    if (!ruleReviewFile) {
+        showToast('请先选择合同文件', 'error');
+        return;
+    }
+
+    const stance = document.querySelector('input[name="rule-review-stance"]:checked').value;
+    if (!stance) {
+        showToast('请选择审查立场', 'error');
+        return;
+    }
+
+    logger.log('✓ 用户选择一键审查立场:', stance);
+
+    // 隐藏审查选项，显示加载
+    document.getElementById('review-options-section').style.display = 'none';
+    const loadingDiv = document.getElementById('rule-review-loading');
+    loadingDiv.style.display = 'flex';
+    loadingDiv.innerHTML = '<div class="spinner"></div><p>步骤 1/6: 正在解析合同...' +
+                          '<br/>步骤 2/6: 正在进行规则匹配和生成Prompt...' +
+                          '<br/>步骤 3/6: 正在调用Qwen进行审查...' +
+                          '<br/>步骤 4/6: 正在生成批注...' +
+                          '<br/>步骤 5/6: 正在保存文档...' +
+                          '<br/>请稍候...</p>';
+
+    try {
+        const contractType = document.getElementById('rule-review-contract-type').value;
+        const formData = new FormData();
+        formData.append('file', ruleReviewFile);
+        formData.append('stance', stance);
+
+        logger.log('调用一键审查接口', {file: ruleReviewFile.name, stance});
+
+        // 【关键修复】保存立场到全局变量
+        window.ruleReviewStance = stance;
+        logger.log('✅ 【关键】proceedWithOneClickReview 已保存审查立场:', window.ruleReviewStance);
+
+        const response = await fetch('/api/qwen/rule-review/one-click-review', {
+            method: 'POST',
+            body: formData
+        });
+
+        logger.log('📥 收到响应，状态码:', response.status);
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '一键审查失败');
+        }
+
+        // 一键审查返回文件流，直接下载
+        const blob = await response.blob();
+        const filename = ruleReviewFile.name.replace(/\.(docx|doc)$/i, '') + '_一键审查_' + stance + '.docx';
+
+        logger.log('💾 下载文件:', filename);
+
+        // 下载文件
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        // 隐藏加载动画
+        loadingDiv.style.display = 'none';
+
+        // 显示成功消息
+        showToast('✅ 一键审查完成！文件已下载。同时已自动保存到文档中心。', 'success');
+
+        // 显示完成提示（可选）
+        const resultDiv = document.getElementById('rule-review-result');
+        if (resultDiv) {
+            resultDiv.style.display = 'block';
+            const html = `
+                <div style="background: #e8f5e9; border-left: 4px solid #4CAF50; padding: 15px; border-radius: 4px;">
+                    <h3 style="color: #2e7d32; margin-top: 0;">✅ 一键审查成功</h3>
+                    <p><strong>📄 文件:</strong> ${filename}</p>
+                    <p><strong>👁️ 审查立场:</strong> ${stance}</p>
+                    <p><strong>📍 保存位置:</strong> 文档中心/已生成的审查报告/</p>
+                </div>
+            `;
+            resultDiv.innerHTML = html;
+        }
+
+    } catch (error) {
+        logger.error('一键审查失败', error);
+        loadingDiv.style.display = 'none';
+        showToast('❌ 一键审查失败：' + error.message, 'error');
+    }
+}

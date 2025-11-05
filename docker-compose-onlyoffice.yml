@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  onlyoffice-documentserver:
+    image: onlyoffice/documentserver:latest
+    container_name: onlyoffice-documentserver
+    ports:
+      - "8082:80"
+      - "8445:443"
+    environment:
+      - JWT_ENABLED=false
+      - JWT_SECRET=your-secret-key
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+    restart: unless-stopped
+    networks:
+      - onlyoffice-network
+
+volumes:
+  onlyoffice_data:
+  onlyoffice_logs:
+
+networks:
+  onlyoffice-network:
+    driver: bridge

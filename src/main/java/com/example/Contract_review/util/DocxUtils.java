@@ -2,9 +2,6 @@ package com.example.Contract_review.util;
 
 import com.example.Contract_review.model.Clause;
 import com.example.Contract_review.model.ParagraphAnchor;
-import org.apache.poi.hwpf.HWPFDocument;
-import org.apache.poi.hwpf.usermodel.Paragraph;
-import org.apache.poi.hwpf.usermodel.Range;
 import org.apache.poi.xwpf.usermodel.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,7 +12,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigInteger;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.*;
 
 /**
@@ -37,36 +33,6 @@ public class DocxUtils {
      */
     public XWPFDocument loadDocx(InputStream inputStream) throws IOException {
         return new XWPFDocument(inputStream);
-    }
-
-    /**
-     * 从输入流中加载DOC文档(旧版Word格式)
-     *
-     * @param inputStream 文档输入流
-     * @return HWPFDocument对象
-     * @throws IOException 读取失败
-     */
-    public HWPFDocument loadDoc(InputStream inputStream) throws IOException {
-        return new HWPFDocument(inputStream);
-    }
-
-    /**
-     * 解析DOC文档(旧版Word格式)为文本列表
-     *
-     * @param doc HWPFDocument对象
-     * @return 段落文本列表
-     */
-    public List<String> parseDocParagraphs(HWPFDocument doc) {
-        List<String> paragraphs = new ArrayList<>();
-        Range range = doc.getRange();
-
-        for (int i = 0; i < range.numParagraphs(); i++) {
-            Paragraph para = range.getParagraph(i);
-            String text = para.text().trim();
-            paragraphs.add(text);
-        }
-
-        return paragraphs;
     }
 
     /**
@@ -101,37 +67,6 @@ public class DocxUtils {
                     elements.stream().filter(e -> e.getType() == DocumentElement.Type.TABLE).count());
 
         return elements;
-    }
-
-    /**
-     * 解析DOCX文档为段落列表（兼容性方法）
-     * 保持向后兼容，同时提取表格内容转换为文本
-     *
-     * @param doc XWPFDocument对象
-     * @return 段落文本列表（包含表格内容）
-     */
-    public List<String> parseParagraphs(XWPFDocument doc) {
-        List<String> paragraphs = new ArrayList<>();
-
-        // 遍历文档的所有主体元素（段落和表格）
-        for (org.apache.poi.xwpf.usermodel.IBodyElement element : doc.getBodyElements()) {
-            if (element instanceof XWPFParagraph) {
-                XWPFParagraph para = (XWPFParagraph) element;
-                String text = para.getText().trim();
-                if (!text.isEmpty()) {
-                    paragraphs.add(text);
-                }
-            } else if (element instanceof XWPFTable) {
-                // 将表格转换为文本格式并添加到段落列表
-                XWPFTable table = (XWPFTable) element;
-                String tableText = convertTableToText(table);
-                if (!tableText.isEmpty()) {
-                    paragraphs.add("【表格内容】\n" + tableText);
-                }
-            }
-        }
-
-        return paragraphs;
     }
 
     /**
@@ -1008,7 +943,7 @@ public class DocxUtils {
             org.openxmlformats.schemas.wordprocessingml.x2006.main.CTComment ctComment =
                 ctDocument.getComments().addNewComment();
             ctComment.setId(commentId);
-            ctComment.setAuthor("AI Review Assistant");
+            ctComment.setAuthor("AI审查助手");
             ctComment.setDate(java.util.Calendar.getInstance());
             ctComment.setInitials("AI");
 
@@ -1065,6 +1000,7 @@ public class DocxUtils {
      * @param targetPara 目标段落
      * @param commentText 批注内容
      */
+    @SuppressWarnings("unused")
     private void createSimpleWordComment(XWPFDocument doc, XWPFParagraph targetPara, String commentText) {
         try {
             // 生成批注ID
@@ -1260,5 +1196,26 @@ public class DocxUtils {
             logger.info("【文档保存】文档已保存到字节数组: 文档大小={} 字节", bytes.length);
             return bytes;
         }
+    }
+
+    public List<String> parseParagraphs(XWPFDocument doc) {
+        List<String> paragraphs = new ArrayList<>();
+
+        for (IBodyElement element : doc.getBodyElements()) {
+            if (element instanceof XWPFParagraph) {
+                XWPFParagraph para = (XWPFParagraph) element;
+                String text = para.getText().trim();
+                if (!text.isEmpty()) {
+                    paragraphs.add(text);
+                }
+            } else if (element instanceof XWPFTable) {
+                String tableText = convertTableToText((XWPFTable) element);
+                if (!tableText.isEmpty()) {
+                    paragraphs.add("【表格内容】\n" + tableText);
+                }
+            }
+        }
+
+        return paragraphs;
     }
 }

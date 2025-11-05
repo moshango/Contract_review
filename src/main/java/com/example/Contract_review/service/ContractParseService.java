@@ -5,7 +5,6 @@ import com.example.Contract_review.model.ParseResult;
 import com.example.Contract_review.model.PartyInfo;
 import com.example.Contract_review.util.DocxUtils;
 import com.example.Contract_review.util.PartyNameExtractor;
-import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.slf4j.Logger;
@@ -35,6 +34,9 @@ public class ContractParseService {
 
     @Autowired
     private ParseResultCache parseResultCache;
+
+    @Autowired
+    private AsposeConverter asposeConverter;
 
     /**
      * 解析合同文档
@@ -75,61 +77,58 @@ public class ContractParseService {
         byte[] anchoredDocumentBytes = null;  // 【新增】用于缓存
         PartyInfo partyInfo = null;
         String fullContractText = "";
+        boolean convertedFromDoc = false;
+        String generatedDocxFilename = null;
 
-        if (isDocx) {
-            // 处理 .docx 文件
-            XWPFDocument doc = docxUtils.loadDocx(new ByteArrayInputStream(fileBytes));
+        if (filename != null) {
+            generatedDocxFilename = filename.replaceAll("\\.(?i)(docx|doc)$", "") + "_with_anchors.docx";
+        } else {
+            generatedDocxFilename = "contract_with_anchors.docx";
+        }
 
-            // 【修复】使用真实段落索引方法（解决虚拟索引混乱问题）
-            // 之前: extractClausesWithTables() 使用虚拟索引（混入表格），导致批注定位错误
-            // 现在: extractClausesWithCorrectIndex() 使用真实段落索引，确保批注定位准确
-            clauses = docxUtils.extractClausesWithCorrectIndex(doc, generateAnchors);
+        byte[] workingDocBytes = fileBytes;
+        XWPFDocument workingDoc = null;
 
-            title = docxUtils.extractTitle(doc);
-            wordCount = docxUtils.countWords(doc);
-            paragraphCount = docxUtils.countParagraphs(doc);
+        try {
+            if (isDocx) {
+                // 处理 .docx 文件
+                workingDoc = docxUtils.loadDocx(new ByteArrayInputStream(workingDocBytes));
+            } else {
+                workingDocBytes = asposeConverter.convertDocToDocx(fileBytes, filename);
+                workingDoc = docxUtils.loadDocx(new ByteArrayInputStream(workingDocBytes));
+                convertedFromDoc = true;
+                logger.info("已使用Aspose将 DOC 文档转换为临时 DOCX 以生成锚点");
+            }
 
-            // 【新增】如果需要生成锚点，保存带锚点的文档
+            // 【修复】使用真实段落索引方法
+            clauses = docxUtils.extractClausesWithCorrectIndex(workingDoc, generateAnchors);
+
+            title = docxUtils.extractTitle(workingDoc);
+            wordCount = docxUtils.countWords(workingDoc);
+            paragraphCount = docxUtils.countParagraphs(workingDoc);
+
             if (generateAnchors) {
-                anchoredDocumentBytes = docxUtils.writeToBytes(doc);
+                anchoredDocumentBytes = docxUtils.writeToBytes(workingDoc);
                 logger.info("✓ 带锚点文档已生成，大小: {} 字节", anchoredDocumentBytes != null ? anchoredDocumentBytes.length : 0);
             }
 
-            // 【新增】在同一个文档加载中提取甲乙方信息和完整合同文本（避免重新加载文件）
             StringBuilder fullText = new StringBuilder();
-            doc.getParagraphs().forEach(p -> fullText.append(p.getText()).append("\n"));
+            workingDoc.getParagraphs().forEach(p -> fullText.append(p.getText()).append("\n"));
             fullContractText = fullText.toString();
-            partyInfo = extractPartyInfoFromDocx(doc);
+            partyInfo = extractPartyInfoFromDocx(workingDoc);
 
             if (partyInfo != null && partyInfo.isComplete()) {
                 logger.info("✓ 识别到甲方: {}, 乙方: {}", partyInfo.getPartyA(), partyInfo.getPartyB());
             } else {
                 logger.warn("⚠ 未能完整识别甲乙方信息");
             }
-
-            doc.close();
-        } else {
-            // 处理 .doc 文件（旧格式不支持表格提取）
-            HWPFDocument doc = docxUtils.loadDoc(new ByteArrayInputStream(fileBytes));
-            List<String> paragraphs = docxUtils.parseDocParagraphs(doc);
-            clauses = docxUtils.extractClauses(paragraphs, generateAnchors);
-            title = paragraphs.isEmpty() ? "未命名文档" : paragraphs.get(0);
-            wordCount = paragraphs.stream().mapToInt(String::length).sum();
-            paragraphCount = paragraphs.size();
-
-            // 【新增】在同一个文档加载中提取甲乙方信息和完整合同文本
-            StringBuilder fullText = new StringBuilder();
-            paragraphs.forEach(p -> fullText.append(p).append("\n"));
-            fullContractText = fullText.toString();
-            partyInfo = extractPartyInfoFromParagraphs(paragraphs);
-
-            if (partyInfo != null && partyInfo.isComplete()) {
-                logger.info("✓ 识别到甲方: {}, 乙方: {}", partyInfo.getPartyA(), partyInfo.getPartyB());
-            } else {
-                logger.warn("⚠ 未能完整识别甲乙方信息");
+        } finally {
+            if (workingDoc != null) {
+                try {
+                    workingDoc.close();
+                } catch (IOException ignore) {
+                }
             }
-
-            doc.close();
         }
 
         // 提取条款（原有逻辑已经整合到上面）
@@ -158,7 +157,9 @@ public class ContractParseService {
                     .clauses(clauses)
                     .build();
 
-            parseResultId = parseResultCache.store(tempResult, anchoredDocumentBytes, filename);
+            String cacheFilename = generatedDocxFilename != null ? generatedDocxFilename :
+                    (filename != null ? filename.replaceAll("\\.(?i)(docx|doc)$", "") + "_with_anchors.docx" : "contract_with_anchors.docx");
+            parseResultId = parseResultCache.store(tempResult, anchoredDocumentBytes, cacheFilename);
             logger.info("✓ 带锚点文档已保存到缓存，parseResultId: {}", parseResultId);
         }
 
@@ -185,6 +186,11 @@ public class ContractParseService {
             result.getMeta().put("parseResultId", parseResultId);
         }
 
+        result.getMeta().put("convertedFromDoc", convertedFromDoc);
+        if (generatedDocxFilename != null) {
+            result.getMeta().put("generatedDocxFilename", generatedDocxFilename);
+        }
+
         return result;
     }
 
@@ -203,9 +209,19 @@ public class ContractParseService {
 
         String filename = file.getOriginalFilename();
         boolean isDocx = filename != null && filename.toLowerCase().endsWith(".docx");
+        boolean isDoc = filename != null && filename.toLowerCase().endsWith(".doc");
 
-        if (!isDocx) {
-            throw new IllegalArgumentException("生成带锚点文档仅支持 .docx 格式");
+        if (!isDocx && !isDoc) {
+            throw new IllegalArgumentException("生成带锚点文档仅支持 .docx 和 .doc 格式");
+        }
+
+        boolean convertedFromDoc = false;
+        String documentDownloadName;
+
+        if (filename != null) {
+            documentDownloadName = filename.replaceAll("\\.(?i)(docx|doc)$", "") + "_with_anchors.docx";
+        } else {
+            documentDownloadName = "contract_with_anchors.docx";
         }
 
         // 判断是否需要生成锚点
@@ -214,9 +230,19 @@ public class ContractParseService {
 
         // 加载文档
         byte[] fileBytes = file.getBytes();
-        XWPFDocument doc = docxUtils.loadDocx(new ByteArrayInputStream(fileBytes));
+        byte[] workingDocBytes = fileBytes;
+        XWPFDocument doc = null;
 
         try {
+            if (isDocx) {
+                doc = docxUtils.loadDocx(new ByteArrayInputStream(workingDocBytes));
+            } else {
+                workingDocBytes = asposeConverter.convertDocToDocx(fileBytes, filename);
+                doc = docxUtils.loadDocx(new ByteArrayInputStream(workingDocBytes));
+                convertedFromDoc = true;
+                logger.info("已使用Aspose将 DOC 文档转换为临时 DOCX 以生成锚点");
+            }
+
             // 【修复】使用真实段落索引方法（解决虚拟索引混乱问题）
             List<Clause> clauses = docxUtils.extractClausesWithCorrectIndex(doc, generateAnchors);
 
@@ -253,6 +279,11 @@ public class ContractParseService {
             Map<String, Object> meta = new HashMap<>();
             meta.put("wordCount", wordCount);
             meta.put("paragraphCount", paragraphCount);
+            meta.put("anchorSourceFilename", filename);
+            meta.put("convertedFromDoc", convertedFromDoc);
+            if (convertedFromDoc) {
+                meta.put("generatedDocxFilename", documentDownloadName);
+            }
 
             ParseResult parseResult = ParseResult.builder()
                     .filename(filename)
@@ -274,10 +305,10 @@ public class ContractParseService {
                 logger.info("【工作流】未启用锚点生成，documentBytes=null");
             }
 
-            logger.info("解析完成并生成带锚点文档: title={}, clauses={}, documentBytes大小={}",
-                       title, clauses.size(), documentBytes != null ? documentBytes.length : 0);
+            logger.info("解析完成并生成带锚点文档: title={}, clauses={}, documentBytes大小={}, convertedFromDoc={}",
+                       title, clauses.size(), documentBytes != null ? documentBytes.length : 0, convertedFromDoc);
 
-            return new ParseResultWithDocument(parseResult, documentBytes);
+            return new ParseResultWithDocument(parseResult, documentBytes, documentDownloadName);
         } finally {
             // 【关键】确保关闭文档，释放资源
             try {
@@ -295,10 +326,12 @@ public class ContractParseService {
     public static class ParseResultWithDocument {
         private final ParseResult parseResult;
         private final byte[] documentBytes;
+        private final String documentFilename;
 
-        public ParseResultWithDocument(ParseResult parseResult, byte[] documentBytes) {
+        public ParseResultWithDocument(ParseResult parseResult, byte[] documentBytes, String documentFilename) {
             this.parseResult = parseResult;
             this.documentBytes = documentBytes;
+            this.documentFilename = documentFilename;
         }
 
         public ParseResult getParseResult() {
@@ -307,6 +340,10 @@ public class ContractParseService {
 
         public byte[] getDocumentBytes() {
             return documentBytes;
+        }
+
+        public String getDocumentFilename() {
+            return documentFilename;
         }
     }
 
@@ -319,9 +356,6 @@ public class ContractParseService {
      */
     private PartyInfo extractPartyInfoFromDocx(XWPFDocument doc) {
         PartyInfo.PartyInfoBuilder builder = PartyInfo.builder();
-
-        String partyALine = null;
-        String partyBLine = null;
 
         // 支持的甲方关键词
         String[] partyAKeywords = {"甲方", "买方", "委托方", "需方", "发包人", "客户", "订购方", "用户"};
@@ -396,6 +430,7 @@ public class ContractParseService {
      * @param paragraphs 段落文本列表
      * @return 包含甲乙方信息的 PartyInfo 对象
      */
+    @SuppressWarnings("unused")
     private PartyInfo extractPartyInfoFromParagraphs(List<String> paragraphs) {
         PartyInfo.PartyInfoBuilder builder = PartyInfo.builder();
 

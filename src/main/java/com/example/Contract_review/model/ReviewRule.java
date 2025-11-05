@@ -186,11 +186,20 @@ public class ReviewRule {
         this.matchedKeywords = new java.util.ArrayList<>();
 
         // 优先检查关键字（广召回）
+        String sanitizedText = text.replaceAll("\\s+", "");
         String[] keywordList = getKeywordList();
         for (String keyword : keywordList) {
             String trimmedKeyword = keyword.trim();
+            if (trimmedKeyword.isEmpty()) {
+                continue;
+            }
             if (text.contains(trimmedKeyword)) {
                 this.matchedKeywords.add(trimmedKeyword);
+            } else {
+                String normalizedKeyword = trimmedKeyword.replaceAll("\\s+", "");
+                if (!normalizedKeyword.isEmpty() && sanitizedText.contains(normalizedKeyword)) {
+                    this.matchedKeywords.add(trimmedKeyword + "(忽略空白)");
+                }
             }
         }
 
@@ -214,7 +223,7 @@ public class ReviewRule {
         if (regex != null && !regex.trim().isEmpty()) {
             if (compiledPattern == null) {
                 try {
-                    compiledPattern = Pattern.compile(regex);
+                    compiledPattern = Pattern.compile(regex, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE | Pattern.DOTALL);
                 } catch (Exception e) {
                     // 正则编译失败，记录日志但不中断
                     System.err.println("Failed to compile regex for rule " + id + ": " + regex);
@@ -223,6 +232,11 @@ public class ReviewRule {
             }
             if (compiledPattern.matcher(text).find()) {
                 this.matchedKeywords.add("正则: " + regex);
+                return true;
+            }
+            // 对去除空白的文本再尝试一次
+            if (compiledPattern.matcher(sanitizedText).find()) {
+                this.matchedKeywords.add("正则(忽略空白): " + regex);
                 return true;
             }
         }

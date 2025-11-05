@@ -2,7 +2,6 @@ package com.example.Contract_review.service;
 
 import com.example.Contract_review.config.AIServiceConfig;
 import com.example.Contract_review.model.ParseResult;
-import com.example.Contract_review.util.DocxUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,9 +9,12 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.InputStream;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.Contract_review.model.ReviewRequest;
+import com.example.Contract_review.model.ReviewIssue;
 
 /**
  * 自动化审查流程服务
@@ -28,7 +30,7 @@ public class AutoReviewService {
     private ContractParseService contractParseService;
 
     @Autowired
-    private ContractAnnotateService contractAnnotateService;
+    private XmlContractAnnotateService xmlContractAnnotateService;
 
     @Autowired
     private AIServiceConfig aiServiceConfig;
@@ -54,7 +56,7 @@ public class AutoReviewService {
     private AIReviewService chatgptWebReviewService;
 
     @Autowired
-    private DocxUtils docxUtils;
+    private ObjectMapper objectMapper;
 
     /**
      * 执行完整的自动化审查流程
@@ -174,20 +176,31 @@ public class AutoReviewService {
      * 批注合同
      */
     private byte[] annotateContract(MultipartFile file, String reviewJson, boolean cleanupAnchors) throws Exception {
-        // 重要：传递文件的副本，确保锚点信息一致
-        // 由于我们在解析阶段可能没有修改原文件，这里需要使用带锚点的版本
-
-        // 先重新解析一遍，确保获得带锚点的文档信息
-        ParseResult parseResultForAnnotation = contractParseService.parseContract(file, "generate");
+        // 重新解析文档，确保获得带锚点的版本
+        ContractParseService.ParseResultWithDocument parseResultWithDoc =
+                contractParseService.parseContractWithDocument(file, "generate");
+        ParseResult parseResultForAnnotation = parseResultWithDoc.getParseResult();
 
         logger.info("为批注重新解析文档: 条款数={}, 锚点数={}",
                    parseResultForAnnotation.getClauses().size(),
                    parseResultForAnnotation.getClauses().stream().mapToInt(c -> c.getAnchorId() != null ? 1 : 0).sum());
 
-        return contractAnnotateService.annotateContract(
-            file,
-            reviewJson,
-            "textFallback",  // 使用文本回退策略，提高定位成功率
+        byte[] documentWithAnchors = parseResultWithDoc.getDocumentBytes();
+        if (documentWithAnchors == null || documentWithAnchors.length == 0) {
+            throw new IllegalStateException("带锚点的文档生成失败，无法继续批注");
+        }
+
+        ReviewRequest reviewRequest = objectMapper.readValue(reviewJson, ReviewRequest.class);
+        List<ReviewIssue> issues = reviewRequest.getIssues();
+        if (issues == null || issues.isEmpty()) {
+            logger.warn("审查结果中没有任何问题，返回原文档");
+            return documentWithAnchors;
+        }
+
+        return xmlContractAnnotateService.annotateContractWithXml(
+            documentWithAnchors,
+            issues,
+            "preferAnchor",
             cleanupAnchors
         );
     }

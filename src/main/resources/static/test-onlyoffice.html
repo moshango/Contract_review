@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OnlyOffice预览器测试</title>
+</head>
+<body>
+    <h1>OnlyOffice预览器测试</h1>
+    <div id="test-container"></div>
+    
+    <script src="/js/onlyoffice-previewer.js"></script>
+    <script>
+        console.log('测试OnlyOffice预览器...');
+        
+        if (typeof window.onlyOfficePreviewer !== 'undefined') {
+            console.log('✅ OnlyOffice预览器加载成功');
+            console.log('预览器对象:', window.onlyOfficePreviewer);
+            
+            // 测试初始化
+            window.onlyOfficePreviewer.init().then(result => {
+                console.log('初始化结果:', result);
+            });
+        } else {
+            console.error('❌ OnlyOffice预览器未定义');
+        }
+    </script>
+</body>
+</html>
