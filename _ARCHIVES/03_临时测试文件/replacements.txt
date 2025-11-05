@@ -1,5 +1,0 @@
-# re:ai\.service\.openai\.api-key=.*$
-ai.service.openai.api-key=${OPENAI_API_KEY}
-
-# re:sk-[A-Za-z0-9_\-]{20,}
-***REMOVED***

@@ -3,6 +3,7 @@ package com.example.Contract_review.controller;
 import com.example.Contract_review.model.ParseResult;
 import com.example.Contract_review.service.ContractAnnotateService;
 import com.example.Contract_review.service.ContractParseService;
+import com.example.Contract_review.service.ParseResultCache;
 import com.example.Contract_review.service.XmlContractAnnotateService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -42,6 +43,9 @@ public class ContractController {
 
     @Autowired
     private ObjectMapper objectMapper;
+    
+    @Autowired
+    private ParseResultCache parseResultCache;
 
     /**
      * 合同解析接口
@@ -79,8 +83,23 @@ public class ContractController {
 
             // 根据返回模式处理
             if ("json".equalsIgnoreCase(returnMode)) {
-                // 仅返回JSON
-                ParseResult result = parseService.parseContract(file, anchors);
+                // 【优化】使用parseContractWithDocument并缓存结果
+                ContractParseService.ParseResultWithDocument resultWithDoc =
+                        parseService.parseContractWithDocument(file, anchors);
+                
+                ParseResult result = resultWithDoc.getParseResult();
+                
+                // ✅ 如果生成了锚点，保存到缓存（避免一键审查时重复解析）
+                if ("generate".equalsIgnoreCase(anchors) && resultWithDoc.getDocumentBytes() != null) {
+                    String cacheId = parseResultCache.store(
+                        result, 
+                        resultWithDoc.getDocumentBytes(), 
+                        filename
+                    );
+                    result.setCacheId(cacheId);  // 添加cacheId到返回结果
+                    logger.info("✓ 解析结果已缓存: cacheId={}, 有效期240分钟", cacheId);
+                }
+                
                 return ResponseEntity.ok(result);
 
             } else if ("file".equalsIgnoreCase(returnMode)) {

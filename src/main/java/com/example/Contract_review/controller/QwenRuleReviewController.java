@@ -241,13 +241,14 @@ public class QwenRuleReviewController {
     @PostMapping("/one-click-review")
     public ResponseEntity<?> oneClickReview(
             @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "cacheId", required = false) String cacheId,  // ← 新增：缓存ID
             @RequestParam(value = "stance", defaultValue = "neutral") String stance) {
 
         long startTime = System.currentTimeMillis();
 
         try {
             log.info("=== 开始一键审查流程 ===");
-            log.info("文件: {}, 立场: {}", file.getOriginalFilename(), stance);
+            log.info("文件: {}, 立场: {}, cacheId: {}", file.getOriginalFilename(), stance, cacheId);
 
             // 步骤1：验证文件
             if (file == null || file.isEmpty()) {
@@ -284,17 +285,51 @@ public class QwenRuleReviewController {
                 log.warn("原始文件上传MinIO失败: {}", ex.getMessage());
             }
 
-            // 步骤2：解析合同（启用锚点）
-            log.info("步骤1/6: 正在解析合同...");
-
-            // 【关键修复】改用 parseContractWithDocument() 方法，确保锚点被真正插入到文档中
-            // 与规则审查流程一致，避免缓存和字节不同步的问题
-            ContractParseService.ParseResultWithDocument parseResultWithDoc =
-                contractParseService.parseContractWithDocument(file, "generate");
+            // 步骤2：解析合同（优先使用缓存，避免重复解析）
+            ContractParseService.ParseResultWithDocument parseResultWithDoc = null;
+            boolean usedCache = false;
+            
+            // ✅ 尝试从缓存获取
+            if (cacheId != null && !cacheId.isEmpty()) {
+                try {
+                    ParseResultCache.CachedParseResult cached = parseResultCache.retrieve(cacheId);
+                    if (cached != null) {
+                        // 验证文件名匹配（安全检查）
+                        if (cached.sourceFilename.equals(file.getOriginalFilename())) {
+                            parseResultWithDoc = new ContractParseService.ParseResultWithDocument(
+                                cached.parseResult,
+                                cached.documentWithAnchorsBytes,
+                                cached.sourceFilename
+                            );
+                            usedCache = true;
+                            long savedTime = estimateParseTime(file.getSize());
+                            log.info("✓ 使用缓存解析结果，节省约 {}ms（缓存年龄: {}秒）", 
+                                    savedTime, cached.getAgeSeconds());
+                        } else {
+                            log.warn("缓存文件名不匹配（安全检查失败），强制重新解析");
+                        }
+                    } else {
+                        log.info("缓存已过期或不存在: cacheId={}", cacheId);
+                    }
+                } catch (Exception e) {
+                    log.warn("缓存获取失败，将重新解析: {}", e.getMessage());
+                }
+            }
+            
+            // ❌ 缓存未命中，重新解析（向后兼容）
+            if (parseResultWithDoc == null) {
+                log.info("步骤1/6: 正在解析合同...（缓存未命中）");
+                parseResultWithDoc = contractParseService.parseContractWithDocument(file, "generate");
+                log.info("✓ 合同解析完成");
+            } else {
+                log.info("步骤1/6: ✓ 使用缓存（跳过解析）");
+            }
+            
             ParseResult parseResult = parseResultWithDoc.getParseResult();
             byte[] documentWithAnchorBytes = parseResultWithDoc.getDocumentBytes();
 
-            log.info("✓ 合同解析完成，识别 {} 个条款，带锚点文档大小: {} bytes",
+            log.info("✓ 解析完成（{}），识别 {} 个条款，带锚点文档大小: {} bytes",
+                    usedCache ? "缓存" : "实时解析",
                     parseResult.getClauses().size(),
                     documentWithAnchorBytes != null ? documentWithAnchorBytes.length : 0);
 
@@ -633,5 +668,24 @@ public class QwenRuleReviewController {
          * 【关键】可选：parseResultId - 用于后续批注时使用带锚点的文档
          */
         private String parseResultId;
+    }
+    
+    /**
+     * 估算文档解析时间（用于性能日志）
+     * 
+     * 经验公式：fileSize(KB) / 100 秒
+     * 
+     * @param fileSize 文件大小（字节）
+     * @return 估算的解析时间（毫秒）
+     */
+    private long estimateParseTime(long fileSize) {
+        long fileSizeKB = fileSize / 1024;
+        long estimatedSeconds = fileSizeKB / 100;
+        
+        // 最小0.5秒，最大5秒
+        if (estimatedSeconds < 1) estimatedSeconds = 1;
+        if (estimatedSeconds > 5) estimatedSeconds = 5;
+        
+        return estimatedSeconds * 1000;  // 转为毫秒
     }
 }

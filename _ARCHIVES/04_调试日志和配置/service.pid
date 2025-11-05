@@ -1,1 +1,0 @@
- sleep 20 tail -10 service.log
